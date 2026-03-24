@@ -1,15 +1,16 @@
 /*!
  * Flash Products Widget v1.0.0
- * Build Date: 19.03.2026 23:22:55
+ * Build Date: 24.03.2026 19:05:44
  * (c) 2026 Yuddy
  */
 var FlashProducts = (function (exports) {
     'use strict';
 
-    globalThis.__BUILD_ENV__ = '';
+    globalThis.__BUILD_ENV__ = 'test';
 
     const CACHE_KEY_PREFIX = 'yuddy_fp_';
-    const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+    // Kısa TTL: panelden kayıt sonrası yeni updateDate / counter hızlı yansısın (sayaç ankeri güncellensin)
+    const CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes
     class StorageManager {
         getKey(storeName) {
             return `${CACHE_KEY_PREFIX}${storeName}`;
@@ -105,6 +106,7 @@ var FlashProducts = (function (exports) {
     function getDefaultDemoData() {
         return {
             isActive: true,
+            updateDate: new Date().toISOString(),
             flashProductGeneralSettings: {
                 title: 'Flash Ürünler',
                 titleIcon: '⚡',
@@ -202,6 +204,9 @@ var FlashProducts = (function (exports) {
         const hasScroll = products.length > 4;
         const sectionModifier = hasScroll ? ` ${SECTION_CLASS}--scrollable` : '';
         const counterHours = Math.max(0, Math.min(999, settings.counter ?? 24));
+        const updateDateIso = data.updateDate != null && String(data.updateDate).trim() !== ''
+            ? String(data.updateDate).trim()
+            : '';
         const arrowSvg = (dir) => {
             const path = dir === 'left'
                 ? 'M15 18l-6-6 6-6'
@@ -209,7 +214,7 @@ var FlashProducts = (function (exports) {
             return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
         };
         return `
-    <section id="${SECTION_ID$1}" class="${SECTION_CLASS}${sectionModifier}" style="background-color:${escapeHtml(bg)};" data-counter-hours="${counterHours}">
+    <section id="${SECTION_ID$1}" class="${SECTION_CLASS}${sectionModifier}" style="background-color:${escapeHtml(bg)};" data-counter-hours="${counterHours}" data-update-date="${escapeHtml(updateDateIso)}">
       <div class="${SECTION_CLASS}__header" style="justify-content:${titlePosition};">
         <div class="${SECTION_CLASS}__header-left">
           ${iconHtml}
@@ -264,57 +269,65 @@ var FlashProducts = (function (exports) {
         list.addEventListener('scroll', updateArrows);
         updateArrows();
     }
-    const COUNTDOWN_STORAGE_KEY = 'yuddy_fp_countdown_end';
     function pad2(n) {
         return n < 10 ? '0' + n : String(n);
     }
-    /** Başlığın sağındaki geri sayımı başlatır (counter = saat, saniye bazlı güncelleme) */
+    /**
+     * Sayaç döngüsü (kalkmaz):
+     * - Başlangıç zamanı her zaman API’den gelen `updateDate` (kampanya ayarı son kayıt anı).
+     * - İlk ve sonraki tüm periyotlar: [updateDate + n*counterSaat, updateDate + (n+1)*counterSaat).
+     * - Periyot bitiminde kalan süre tekrar tam `counter` saate sıçrar (yenilenir).
+     * Kullanıcı panelde kaydettiğinde backend `updateDate` günceller; widget yeni veriyi alınca sayaç o ana göre hizalanır.
+     */
+    function getCycleRemainingMs(anchorMs, periodMs, now) {
+        if (periodMs <= 0)
+            return 0;
+        if (now < anchorMs) {
+            return Math.max(0, anchorMs + periodMs - now);
+        }
+        const elapsed = now - anchorMs;
+        const rem = periodMs - (elapsed % periodMs);
+        return rem;
+    }
+    /** Başlığın sağındaki geri sayım: anker = API updateDate, periyot = counter (saat), döngüsel yenileme */
     function attachCountdown(section) {
         if (!section)
             return;
         const counterHours = parseInt(section.getAttribute('data-counter-hours') || '24', 10);
+        const updateDateStr = section.getAttribute('data-update-date')?.trim() || '';
         const elH = section.querySelector(`.${SECTION_CLASS}__countdown-card-value[data-unit="h"]`);
         const elM = section.querySelector(`.${SECTION_CLASS}__countdown-card-value[data-unit="m"]`);
         const elS = section.querySelector(`.${SECTION_CLASS}__countdown-card-value[data-unit="s"]`);
         if (!elH || !elM || !elS)
             return;
-        const now = Date.now();
-        const durationMs = counterHours * 60 * 60 * 1000;
-        let endTime;
-        try {
-            const stored = sessionStorage.getItem(COUNTDOWN_STORAGE_KEY);
-            if (stored) {
-                const parsed = parseInt(stored, 10);
-                if (parsed > now)
-                    endTime = parsed;
-                else
-                    endTime = now + durationMs;
-            }
-            else {
-                endTime = now + durationMs;
-                sessionStorage.setItem(COUNTDOWN_STORAGE_KEY, String(endTime));
-            }
-        }
-        catch {
-            endTime = now + durationMs;
+        const periodMs = counterHours * 60 * 60 * 1000;
+        // Anker yalnızca API tarihi; yoksa / geçersizse (ör. demo) istemci zamanı
+        let anchorMs = Date.parse(updateDateStr);
+        if (Number.isNaN(anchorMs)) {
+            anchorMs = Date.now();
         }
         let intervalId = null;
         const tick = () => {
-            const remaining = endTime - Date.now();
+            if (periodMs <= 0) {
+                elH.textContent = '00';
+                elM.textContent = '00';
+                elS.textContent = '00';
+                return;
+            }
+            const now = Date.now();
+            const remaining = getCycleRemainingMs(anchorMs, periodMs, now);
             if (remaining <= 0) {
                 elH.textContent = '00';
                 elM.textContent = '00';
                 elS.textContent = '00';
                 section.querySelector(`.${SECTION_CLASS}__countdown`)?.setAttribute('aria-label', 'Kampanya süresi doldu');
-                if (intervalId) {
-                    clearInterval(intervalId);
-                    intervalId = null;
-                }
                 return;
             }
-            const s = Math.floor(remaining / 1000) % 60;
-            const m = Math.floor(remaining / 60000) % 60;
-            const h = Math.floor(remaining / 3600000);
+            section.querySelector(`.${SECTION_CLASS}__countdown`)?.setAttribute('aria-label', 'Kampanya bitiş sayacı');
+            const totalSec = Math.floor(remaining / 1000);
+            const s = totalSec % 60;
+            const m = Math.floor(totalSec / 60) % 60;
+            const h = Math.floor(totalSec / 3600);
             elH.textContent = pad2(h);
             elM.textContent = pad2(m);
             elS.textContent = pad2(s);
@@ -499,7 +512,7 @@ var FlashProducts = (function (exports) {
       }
     }
 
-    var css_248z = "/* ==========================================================================\n   Flash Products – E-ticaret uyumlu bölüm (renkler kullanıcı ayarından)\n   ========================================================================== */\n\n.yuddy-flash-products {\n  box-sizing: border-box;\n  width: 100%;\n  margin: 0 auto;\n  max-width: 1280px;\n  padding: 5px 20px;\n  border-radius: 12px;\n}\n\n.yuddy-flash-products__header {\n  display: flex;\n  align-items: center;\n  gap: 16px;\n  margin-bottom: 20px;\n  padding: 0 4px;\n}\n\n.yuddy-flash-products__header-left {\n  display: flex;\n  align-items: center;\n  gap: 10px;\n  min-width: 0;\n}\n\n.yuddy-flash-products__title-icon {\n  font-size: 1.5rem;\n  line-height: 1;\n  flex-shrink: 0;\n}\n\n.yuddy-flash-products__title {\n  margin: 0;\n  font-size: 1.25rem;\n  font-weight: 700;\n  letter-spacing: -0.02em;\n  line-height: 1.25;\n}\n\n/* Geri sayım – title'ın 20px sağında, saat/dk/sn ayrı kartlar */\n.yuddy-flash-products__countdown {\n  flex-shrink: 0;\n  margin-left: 20px;\n  display: flex;\n  align-items: stretch;\n  gap: 6px;\n}\n\n.yuddy-flash-products__countdown-card {\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  justify-content: center;\n  min-width: 44px;\n  padding: 8px 10px 6px;\n  background: rgba(255, 255, 255, 0.45);\n  border-radius: 10px;\n  box-shadow:\n    inset 0 2px 6px rgba(0, 0, 0, 0.08),\n    0 1px 2px rgba(0, 0, 0, 0.06);\n  border: 1px solid rgba(255, 255, 255, 0.6);\n}\n\n.yuddy-flash-products__countdown-card-value {\n  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Consolas', monospace;\n  font-size: 1.125rem;\n  font-weight: 700;\n  letter-spacing: 0.02em;\n  color: currentColor;\n  line-height: 1.2;\n}\n\n.yuddy-flash-products__countdown-card-label {\n  font-size: 0.625rem;\n  font-weight: 600;\n  text-transform: uppercase;\n  letter-spacing: 0.04em;\n  color: currentColor;\n  opacity: 0.7;\n  margin-top: 4px;\n}\n\n/* Liste sarmalayıcı – oklar burada konumlanır */\n.yuddy-flash-products__list-wrapper {\n  position: relative;\n  margin: 0 -4px;\n}\n\n/* Liste: scrollbar gizli, yatay kaydırma oklarla */\n.yuddy-flash-products__list {\n  display: flex;\n  gap: 16px;\n  overflow-x: auto;\n  overflow-y: hidden;\n  padding: 4px 4px 8px;\n  margin: 0 -4px;\n  scroll-behavior: smooth;\n  -webkit-overflow-scrolling: touch;\n  scrollbar-width: none;\n  -ms-overflow-style: none;\n}\n\n.yuddy-flash-products__list::-webkit-scrollbar {\n  display: none;\n}\n\n/* Sol / sağ ok butonları – sadece kaydırılabilir listede görünür */\n.yuddy-flash-products__arrow {\n  position: absolute;\n  top: 50%;\n  transform: translateY(-50%);\n  z-index: 2;\n  width: 44px;\n  height: 44px;\n  border-radius: 50%;\n  border: none;\n  background: #fff;\n  color: #333;\n  cursor: pointer;\n  display: none;\n  align-items: center;\n  justify-content: center;\n  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);\n  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;\n}\n\n.yuddy-flash-products--scrollable .yuddy-flash-products__arrow {\n  display: flex;\n}\n\n.yuddy-flash-products__arrow:hover:not(.yuddy-flash-products__arrow--disabled) {\n  background: #333;\n  color: #fff;\n  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);\n}\n\n.yuddy-flash-products__arrow:active:not(.yuddy-flash-products__arrow--disabled) {\n  transform: translateY(-50%) scale(0.96);\n}\n\n.yuddy-flash-products__arrow--prev {\n  left: 8px;\n}\n\n.yuddy-flash-products__arrow--next {\n  right: 8px;\n}\n\n.yuddy-flash-products__arrow--disabled {\n  opacity: 0.35;\n  cursor: not-allowed;\n  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);\n}\n\n.yuddy-flash-products--scrollable .yuddy-flash-products__list {\n  scroll-padding: 0 16px;\n}\n\n/* Ürün kartı – e-ticaret standartları */\n.yuddy-flash-products__card {\n  flex: 0 0 auto;\n  width: 160px;\n  max-width: calc(50vw - 32px);\n  border-radius: 12px;\n  overflow: hidden;\n  text-decoration: none;\n  display: block;\n  border: 1px solid rgba(0, 0, 0, 0.08);\n  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);\n  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;\n}\n\n.yuddy-flash-products__card:hover {\n  transform: translateY(-4px);\n  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);\n  border-color: rgba(0, 0, 0, 0.12);\n}\n\n.yuddy-flash-products__card:active {\n  transform: translateY(-2px);\n}\n\n.yuddy-flash-products__card-image-wrap {\n  width: 100%;\n  aspect-ratio: 1;\n  background: #f5f5f5;\n  overflow: hidden;\n  position: relative;\n}\n\n.yuddy-flash-products__card-image {\n  width: 100%;\n  height: 100%;\n  object-fit: cover;\n  display: block;\n  transition: transform 0.3s ease;\n}\n\n.yuddy-flash-products__card:hover .yuddy-flash-products__card-image {\n  transform: scale(1.03);\n}\n\n.yuddy-flash-products__card-image-placeholder {\n  width: 100%;\n  height: 100%;\n  background: linear-gradient(145deg, #ebebeb 0%, #f5f5f5 100%);\n}\n\n.yuddy-flash-products__card-body {\n  padding: 14px 12px;\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n  min-height: 72px;\n}\n\n.yuddy-flash-products__card-name {\n  font-size: 0.875rem;\n  font-weight: 600;\n  line-height: 1.35;\n  display: -webkit-box;\n  -webkit-line-clamp: 2;\n  -webkit-box-orient: vertical;\n  overflow: hidden;\n  letter-spacing: 0.01em;\n}\n\n.yuddy-flash-products__card-cta {\n  font-size: 0.8125rem;\n  font-weight: 700;\n  letter-spacing: 0.02em;\n  margin-top: auto;\n}\n\n/* Mobil: kart genişliği, oklar ve sayaç */\n@media (max-width: 480px) {\n  .yuddy-flash-products {\n    padding: 20px 16px 24px;\n  }\n\n  .yuddy-flash-products__card {\n    width: 140px;\n  }\n\n  .yuddy-flash-products__title {\n    font-size: 1.125rem;\n  }\n\n  .yuddy-flash-products__countdown {\n    margin-left: 12px;\n    gap: 4px;\n  }\n\n  .yuddy-flash-products__countdown-card {\n    min-width: 38px;\n    padding: 6px 8px 4px;\n    border-radius: 8px;\n  }\n\n  .yuddy-flash-products__countdown-card-value {\n    font-size: 0.9375rem;\n  }\n\n  .yuddy-flash-products__countdown-card-label {\n    font-size: 0.5625rem;\n    margin-top: 2px;\n  }\n\n  .yuddy-flash-products__list {\n    gap: 12px;\n  }\n\n  .yuddy-flash-products--scrollable .yuddy-flash-products__list {\n    padding-left: 44px;\n    padding-right: 44px;\n  }\n\n  .yuddy-flash-products__arrow {\n    width: 36px;\n    height: 36px;\n  }\n\n  .yuddy-flash-products__arrow--prev {\n    left: 4px;\n  }\n\n  .yuddy-flash-products__arrow--next {\n    right: 4px;\n  }\n\n  .yuddy-flash-products__arrow svg {\n    width: 16px;\n    height: 16px;\n  }\n}\n";
+    var css_248z = "/* ==========================================================================\n   Flash Products – E-ticaret uyumlu bölüm (renkler kullanıcı ayarından)\n   ========================================================================== */\n\n.yuddy-flash-products {\n  box-sizing: border-box;\n  width: 100%;\n  padding: 5px 100px;\n  border-radius: 12px;\n}\n\n.yuddy-flash-products__header {\n  display: flex;\n  align-items: center;\n  gap: 16px;\n  margin-bottom: 20px;\n  padding: 0 4px;\n}\n\n.yuddy-flash-products__header-left {\n  display: flex;\n  align-items: center;\n  gap: 10px;\n  min-width: 0;\n}\n\n.yuddy-flash-products__title-icon {\n  font-size: 1.5rem;\n  line-height: 1;\n  flex-shrink: 0;\n}\n\n.yuddy-flash-products__title {\n  margin: 0;\n  font-size: 1.25rem;\n  font-weight: 700;\n  letter-spacing: -0.02em;\n  line-height: 1.25;\n}\n\n/* Geri sayım – title'ın 20px sağında, saat/dk/sn ayrı kartlar */\n.yuddy-flash-products__countdown {\n  flex-shrink: 0;\n  margin-left: 20px;\n  display: flex;\n  align-items: stretch;\n  gap: 6px;\n}\n\n.yuddy-flash-products__countdown-card {\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  justify-content: center;\n  min-width: 44px;\n  padding: 8px 10px 6px;\n  background: rgba(255, 255, 255, 0.45);\n  border-radius: 10px;\n  box-shadow:\n    inset 0 2px 6px rgba(0, 0, 0, 0.08),\n    0 1px 2px rgba(0, 0, 0, 0.06);\n  border: 1px solid rgba(255, 255, 255, 0.6);\n}\n\n.yuddy-flash-products__countdown-card-value {\n  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Consolas', monospace;\n  font-size: 1.125rem;\n  font-weight: 700;\n  letter-spacing: 0.02em;\n  color: currentColor;\n  line-height: 1.2;\n}\n\n.yuddy-flash-products__countdown-card-label {\n  font-size: 0.625rem;\n  font-weight: 600;\n  text-transform: uppercase;\n  letter-spacing: 0.04em;\n  color: currentColor;\n  opacity: 0.7;\n  margin-top: 4px;\n}\n\n/* Liste sarmalayıcı – oklar burada konumlanır */\n.yuddy-flash-products__list-wrapper {\n  position: relative;\n  margin: 0 -4px;\n}\n\n/* Liste: scrollbar gizli, yatay kaydırma oklarla */\n.yuddy-flash-products__list {\n  display: flex;\n  gap: 16px;\n  overflow-x: auto;\n  overflow-y: hidden;\n  padding: 4px 4px 8px;\n  margin: 0 -4px;\n  scroll-behavior: smooth;\n  -webkit-overflow-scrolling: touch;\n  scrollbar-width: none;\n  -ms-overflow-style: none;\n}\n\n.yuddy-flash-products__list::-webkit-scrollbar {\n  display: none;\n}\n\n/* Sol / sağ ok butonları – sadece kaydırılabilir listede görünür */\n.yuddy-flash-products__arrow {\n  position: absolute;\n  top: 50%;\n  transform: translateY(-50%);\n  z-index: 2;\n  width: 44px;\n  height: 44px;\n  border-radius: 50%;\n  border: none;\n  background: #fff;\n  color: #333;\n  cursor: pointer;\n  display: none;\n  align-items: center;\n  justify-content: center;\n  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);\n  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;\n}\n\n.yuddy-flash-products--scrollable .yuddy-flash-products__arrow {\n  display: flex;\n}\n\n.yuddy-flash-products__arrow:hover:not(.yuddy-flash-products__arrow--disabled) {\n  background: #333;\n  color: #fff;\n  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);\n}\n\n.yuddy-flash-products__arrow:active:not(.yuddy-flash-products__arrow--disabled) {\n  transform: translateY(-50%) scale(0.96);\n}\n\n.yuddy-flash-products__arrow--prev {\n  left: 8px;\n}\n\n.yuddy-flash-products__arrow--next {\n  right: 8px;\n}\n\n.yuddy-flash-products__arrow--disabled {\n  opacity: 0.35;\n  cursor: not-allowed;\n  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.08);\n}\n\n.yuddy-flash-products--scrollable .yuddy-flash-products__list {\n  scroll-padding: 0 16px;\n}\n\n/* Ürün kartı – e-ticaret standartları */\n.yuddy-flash-products__card {\n  flex: 0 0 auto;\n  width: 250px;\n  max-width: calc(50vw - 32px);\n  border-radius: 12px;\n  overflow: hidden;\n  text-decoration: none;\n  display: block;\n  border: 1px solid rgba(0, 0, 0, 0.08);\n  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);\n  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;\n}\n\n.yuddy-flash-products__card:hover {\n  transform: translateY(-4px);\n  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);\n  border-color: rgba(0, 0, 0, 0.12);\n}\n\n.yuddy-flash-products__card:active {\n  transform: translateY(-2px);\n}\n\n.yuddy-flash-products__card-image-wrap {\n  width: 100%;\n  aspect-ratio: 1;\n  background: #f5f5f5;\n  overflow: hidden;\n  position: relative;\n}\n\n.yuddy-flash-products__card-image {\n  width: 100%;\n  height: 100%;\n  object-fit: cover;\n  display: block;\n  transition: transform 0.3s ease;\n}\n\n.yuddy-flash-products__card:hover .yuddy-flash-products__card-image {\n  transform: scale(1.03);\n}\n\n.yuddy-flash-products__card-image-placeholder {\n  width: 100%;\n  height: 100%;\n  background: linear-gradient(145deg, #ebebeb 0%, #f5f5f5 100%);\n}\n\n.yuddy-flash-products__card-body {\n  padding: 14px 12px;\n  display: flex;\n  flex-direction: column;\n  gap: 8px;\n  min-height: 72px;\n}\n\n.yuddy-flash-products__card-name {\n  font-size: 0.875rem;\n  font-weight: 600;\n  line-height: 1.35;\n  display: -webkit-box;\n  -webkit-line-clamp: 2;\n  -webkit-box-orient: vertical;\n  overflow: hidden;\n  letter-spacing: 0.01em;\n}\n\n.yuddy-flash-products__card-cta {\n  font-size: 0.8125rem;\n  font-weight: 700;\n  letter-spacing: 0.02em;\n  margin-top: auto;\n}\n\n/* Mobil: kart genişliği, oklar ve sayaç */\n@media (max-width: 480px) {\n  .yuddy-flash-products {\n    padding: 20px 16px 24px;\n  }\n\n  .yuddy-flash-products__card {\n    width: 140px;\n  }\n\n  .yuddy-flash-products__title {\n    font-size: 1.125rem;\n  }\n\n  .yuddy-flash-products__countdown {\n    margin-left: 12px;\n    gap: 4px;\n  }\n\n  .yuddy-flash-products__countdown-card {\n    min-width: 38px;\n    padding: 6px 8px 4px;\n    border-radius: 8px;\n  }\n\n  .yuddy-flash-products__countdown-card-value {\n    font-size: 0.9375rem;\n  }\n\n  .yuddy-flash-products__countdown-card-label {\n    font-size: 0.5625rem;\n    margin-top: 2px;\n  }\n\n  .yuddy-flash-products__list {\n    gap: 12px;\n  }\n\n  .yuddy-flash-products--scrollable .yuddy-flash-products__list {\n    padding-left: 44px;\n    padding-right: 44px;\n  }\n\n  .yuddy-flash-products__arrow {\n    width: 36px;\n    height: 36px;\n  }\n\n  .yuddy-flash-products__arrow--prev {\n    left: 4px;\n  }\n\n  .yuddy-flash-products__arrow--next {\n    right: 4px;\n  }\n\n  .yuddy-flash-products__arrow svg {\n    width: 16px;\n    height: 16px;\n  }\n}\n";
     styleInject(css_248z);
 
     if (typeof window !== 'undefined') {
