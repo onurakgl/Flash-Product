@@ -6,7 +6,7 @@
 var FlashProducts = (function (exports) {
     'use strict';
 
-    globalThis.__BUILD_ENV__ = 'test';
+    globalThis.__BUILD_ENV__ = 'production';
 
     const CACHE_KEY_PREFIX = 'yuddy_fp_';
     // Kısa TTL: panelden kayıt sonrası yeni updateDate / counter hızlı yansısın (sayaç ankeri güncellensin)
