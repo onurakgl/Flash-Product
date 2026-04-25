@@ -7,7 +7,7 @@ console.log("Selamlama")
 var GlobalWheel = (function (exports) {
     'use strict';
 
-    globalThis.__BUILD_WHEEL_ENV__ = 'test';
+    globalThis.__BUILD_WHEEL_ENV__ = 'production';
 
     // Custom error classes for the Fortune Wheel Widget
     let WheelError$1 = class WheelError extends Error {
