@@ -2470,7 +2470,7 @@ var GlobalWheel = (function (exports) {
         constructor() {
             this.wheelData = null;
             this.isInitialized = false;
-            this.apiBaseUrl = "https://testapi.yuddy.com/api/v1/engagements/global-wheel";
+            this.apiBaseUrl = "https://api.yuddy.com/api/v1/engagements/global-wheel";
             // Popup trigger states
             this.exitIntentEnabled = false;
             this.scrollTriggerEnabled = false;
