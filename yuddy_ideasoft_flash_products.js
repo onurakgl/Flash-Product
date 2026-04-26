@@ -67,7 +67,7 @@ var FlashProducts = (function (exports) {
          * Uses cache (10 min TTL) unless forceRefresh is true.
          */
         async getFlashProduct(storeName, forceRefresh = false) {
-            let hostname = 'danzy.com.tr';
+            let hostname = 'tanadore.com';
             if (this.isLocal(hostname)) {
                 hostname = (typeof window !== 'undefined' && window.YUDDY_FLASH_PRODUCTS_TEST_HOSTNAME) || 'yuddy.store';
             }
@@ -353,27 +353,26 @@ var FlashProducts = (function (exports) {
         tick();
     }
     /**
-     * Sayfa alanları id="entry-row-1", id="entry-row-2", id="entry-row-3", ... ile tanımlı.
+     * Sayfa alanları class="entry-row-1", "entry-row-2", "entry-row-3", ... ile tanımlı.
      * flashBlockPositionRange:
-     *   0 = entry-row-1'den önce
-     *   1 = entry-row-1'den sonra
-     *   2 = entry-row-2'den sonra
-     *   N = entry-row-N'den sonra
-     * Önce bu id'lere göre yer bulunur; yoksa main içindeki çocuk sırasına göre fallback.
+     *   0 = .entry-row-1'den önce
+     *   1 = .entry-row-1'den sonra
+     *   2 = .entry-row-2'den sonra
+     *   N = .entry-row-N'den sonra
+     * Önce bu class'lara göre yer bulunur; yoksa main içindeki çocuk sırasına göre fallback.
      */
     function findInsertionPoint(flashBlockPositionRange) {
         const range = Math.max(0, Math.min(9, flashBlockPositionRange));
-        // 1) Id ile eşleştirme: id="entry-row-1", "entry-row-2", ... (sayfa alanları)
-        // range === 0 → entry-row-1'den önce; range >= 1 → entry-row-${range}'tan sonra
+        // 1) Class ile eşleştirme: .entry-row-1, .entry-row-2, ... (sayfa alanları)
+        // range === 0 → .entry-row-1'den önce; range >= 1 → .entry-row-${range}'tan sonra
         if (range === 0) {
-            const anchor = document.getElementById('entry-row-1');
+            const anchor = document.querySelector('.entry-row-1');
             if (anchor && anchor.parentElement) {
                 return { parent: anchor.parentElement, index: 0, insertBefore: anchor };
             }
         }
         else {
-            const anchorId = `entry-row-${range}`;
-            const anchor = document.getElementById(anchorId);
+            const anchor = document.querySelector(`.entry-row-${range}`);
             if (anchor && anchor.parentElement) {
                 return { parent: anchor.parentElement, index: range, insertAfter: anchor };
             }
