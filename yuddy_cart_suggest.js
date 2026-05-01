@@ -1,6 +1,6 @@
 /*!
  * Cart Suggestion Widget v1.0.0
- * Build Date: 01.05.2026 23:37:17
+ * Build Date: 02.05.2026 00:27:38
  * (c) 2026 Yuddy
  */
 var CartSuggestion = (function (exports) {
@@ -318,6 +318,53 @@ var CartSuggestion = (function (exports) {
         return copy;
     }
 
+    const detectPlatform = () => {
+        if (typeof window === 'undefined' || typeof document === 'undefined') {
+            return 'other';
+        }
+        if (window.IdeasoftSettings !== undefined ||
+            document.querySelector('script[src*="ideasoft"]') !== null ||
+            window.location.hostname.includes('ideasoft')) {
+            return 'ideasoft';
+        }
+        if (window.IKAS !== undefined ||
+            document.querySelector('script[src*="ikas"]') !== null ||
+            window.location.hostname.includes('ikas')) {
+            return 'ikas';
+        }
+        if (window.Shopify !== undefined ||
+            document.querySelector('script[src*="shopify"]') !== null ||
+            document.querySelector('meta[name="shopify-checkout-api-token"]') !== null) {
+            return 'shopify';
+        }
+        if (window.location.hostname.includes('tsoft') || window.TSoft !== undefined) {
+            return 'tsoft';
+        }
+        return 'other';
+    };
+
+    /**
+     * Ürün kartı href'i — render anında çağrılır (API transform zamanındaki platform ile sapma olmasın).
+     */
+    function buildCartProductHref(slug) {
+        if (!slug)
+            return '#';
+        if (slug.startsWith('http://') || slug.startsWith('https://')) {
+            return slug;
+        }
+        if (detectPlatform() === 'ideasoft') {
+            const trimmed = slug.replace(/^\/+|\/+$/g, '');
+            if (!trimmed)
+                return '#';
+            const path = `/${trimmed}`;
+            if (/^\/urun\//i.test(path)) {
+                return path;
+            }
+            return `/urun${path}`;
+        }
+        return slug.startsWith('/') ? slug : `/${slug}`;
+    }
+
     class APIClient {
         constructor(baseUrl, cacheTTL = 60) {
             this.testHostname = 'yuddy.store'; // Default test hostname
@@ -422,22 +469,14 @@ var CartSuggestion = (function (exports) {
                 return `https:${imageUrl}`;
             return imageUrl;
         }
-        buildProductUrl(slug) {
-            if (!slug)
-                return '#';
-            if (slug.startsWith('http://') || slug.startsWith('https://')) {
-                return slug;
-            }
-            const normalizedSlug = slug.startsWith('/') ? slug : `/${slug}`;
-            return normalizedSlug;
-        }
         transformApplicableProductToWidgetProduct(product) {
             return {
                 id: product.id,
                 name: product.name,
                 price: Number(product.price) || 0,
                 imageUrl: this.normalizeImageUrl(product.imageUrl),
-                url: this.buildProductUrl(product.slug),
+                slug: product.slug,
+                url: buildCartProductHref(product.slug),
             };
         }
         /**
@@ -715,7 +754,14 @@ var CartSuggestion = (function (exports) {
             if (itemsContainer) {
                 itemsContainer.innerHTML = '';
                 // Batch insert products (performance)
-                const productsHTML = products.map(product => getProductCardHTML(product.id, product.name, product.price, product.imageUrl, product.url, product.originalPrice, product.badge)).join('');
+                const productsHTML = products
+                    .map((product) => {
+                    const href = product.slug !== undefined && product.slug !== ''
+                        ? buildCartProductHref(product.slug)
+                        : product.url;
+                    return getProductCardHTML(product.id, product.name, product.price, product.imageUrl, href, product.originalPrice, product.badge);
+                })
+                    .join('');
                 itemsContainer.insertAdjacentHTML('beforeend', productsHTML);
             }
             // Stil ayarlarını uygula (DUPLICATE FIX)
@@ -1346,31 +1392,6 @@ var CartSuggestion = (function (exports) {
     const mergeUniqueSelectors = (...selectorGroups) => Array.from(new Set(selectorGroups.flat().filter(Boolean)));
     const getCartSelectorsForPlatform = (platform) => mergeUniqueSelectors(PLATFORM_SELECTOR_CONFIG[platform].cartSelectors, DEFAULT_CART_SELECTORS);
     const getBasketIconSelectorsForPlatform = (platform) => mergeUniqueSelectors(PLATFORM_SELECTOR_CONFIG[platform].basketIconSelectors, DEFAULT_BASKET_ICON_SELECTORS);
-
-    const detectPlatform = () => {
-        if (typeof window === 'undefined' || typeof document === 'undefined') {
-            return 'other';
-        }
-        if (window.IdeasoftSettings !== undefined ||
-            document.querySelector('script[src*="ideasoft"]') !== null ||
-            window.location.hostname.includes('ideasoft')) {
-            return 'ideasoft';
-        }
-        if (window.IKAS !== undefined ||
-            document.querySelector('script[src*="ikas"]') !== null ||
-            window.location.hostname.includes('ikas')) {
-            return 'ikas';
-        }
-        if (window.Shopify !== undefined ||
-            document.querySelector('script[src*="shopify"]') !== null ||
-            document.querySelector('meta[name="shopify-checkout-api-token"]') !== null) {
-            return 'shopify';
-        }
-        if (window.location.hostname.includes('tsoft') || window.TSoft !== undefined) {
-            return 'tsoft';
-        }
-        return 'other';
-    };
 
     var css_248z = "/* Yuddy Cart Suggestion Widget Styles */\n\n.yuddy-cs-widget {\n    width: 100%;\n    margin: 0;\n    padding: 0;\n    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;\n}\n\n/* Slider Container */\n.yuddy-cs-slider-container {\n    padding: 3px;\n    background-color: #FFFFFF;\n    position: relative;\n}\n\n.yuddy-cs-slider-container:not(:last-child) {\n    margin-bottom: 0;\n}\n\n/* Slider Header */\n.yuddy-cs-slider-header {\n    margin-bottom: 12px;\n}\n\n.yuddy-cs-slider-title {\n    font-size: 16px;\n    font-weight: 700;\n    margin: 0;\n    color: #2c3e50;\n    display: flex;\n    align-items: center;\n    gap: 8px;\n}\n\n.yuddy-cs-slider-title-icon {\n    font-size: 20px;\n    display: inline-flex;\n    align-items: center;\n}\n\n/* Slider Wrapper - Horizontal scroll with navigation */\n.yuddy-cs-slider-wrapper {\n    position: relative;\n}\n\n.yuddy-cs-slider-track {\n    overflow-x: auto;\n    scroll-behavior: smooth;\n    scrollbar-width: none;\n    /* Firefox */\n    -ms-overflow-style: none;\n    /* IE and Edge */\n    padding-bottom: 8px;\n}\n\n.yuddy-cs-slider-track::-webkit-scrollbar {\n    display: none;\n    /* Chrome, Safari, Opera */\n}\n\n.yuddy-cs-slider-items {\n    display: flex;\n    gap: 5px;\n}\n\n/* Arrow Buttons - Positioned over slider */\n.yuddy-cs-arrow {\n    position: absolute;\n    top: 50%;\n    transform: translateY(-50%);\n    width: 32px;\n    height: 32px;\n    border: none;\n    background-color: #ffffff;\n    border-radius: 50%;\n    cursor: pointer;\n    display: flex;\n    align-items: center;\n    justify-content: center;\n    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);\n    transition: all 0.2s ease;\n    z-index: 10;\n}\n\n.yuddy-cs-arrow:hover {\n    background-color: #ffffff;\n    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);\n}\n\n.yuddy-cs-arrow:active {\n    transform: translateY(-50%) scale(0.95);\n}\n\n.yuddy-cs-arrow:disabled {\n    opacity: 0.3;\n    cursor: not-allowed;\n}\n\n.yuddy-cs-arrow-prev {\n    left: 8px;\n}\n\n.yuddy-cs-arrow-next {\n    right: 8px;\n}\n\n.yuddy-cs-arrow svg {\n    width: 20px;\n    height: 20px;\n    color: #333333;\n}\n\n/* Dots Navigation */\n.yuddy-cs-dots {\n    display: none;\n    /* Preview'da dots yok */\n}\n\n/* Product Card - Preview tasarımına uygun */\n.yuddy-cs-product-card {\n    flex: 0 0 auto;\n    min-width: 120px;\n    width: 115px;\n    background-color: #ffffff;\n    border-radius: 12px;\n    overflow: hidden;\n    border: 1px solid #e0e0e0;\n    padding: 5px;\n    cursor: pointer;\n    transition: all 0.2s ease;\n}\n\n.yuddy-cs-product-card:hover {\n    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);\n    transform: translateY(-2px);\n}\n\n.yuddy-cs-product-link {\n    text-decoration: none;\n    color: inherit;\n    display: block;\n}\n\n/* Product Image - Preview tasarımı */\n.yuddy-cs-product-image-wrapper {\n    position: relative;\n    width: 100%;\n    margin-bottom: 5px;\n}\n\n.yuddy-cs-product-image {\n    width: 100%;\n    height: 110px;\n    object-fit: cover;\n    border-radius: 8px;\n}\n\n/* Badges - Kaldırıldı (preview'da yok) */\n.yuddy-cs-product-badge,\n.yuddy-cs-product-discount {\n    display: none;\n}\n\n/* Product Info */\n.yuddy-cs-product-info {\n    padding: 0;\n}\n\n.yuddy-cs-product-name {\n    font-size: 12px !important;\n    font-weight: 600;\n    margin: 0 0 4px 0;\n    color: #333333;\n    overflow: hidden;\n    display: -webkit-box;\n    -webkit-line-clamp: 2;   /* 2 satırda sınırla */\n    -webkit-box-orient: vertical;\n    white-space: normal;\n    text-overflow: ellipsis;\n    line-height: 1.4;\n    max-height: 2.8em;\n}\n\n/* Prices */\n.yuddy-cs-product-prices {\n    display: flex;\n    align-items: center;\n    gap: 6px;\n    margin-bottom: 8px;\n}\n\n.yuddy-cs-product-price {\n    font-size: 13px;\n    font-weight: 700;\n    color: #e74c3c;\n}\n\n.yuddy-cs-product-original-price {\n    display: none;\n    /* Preview'da gösterilmiyor */\n}\n\n/* Responsive Design */\n@media (max-width: 1024px) {\n    .yuddy-cs-product-card {\n        flex: 0 0 calc(33.333% - 14px);\n    }\n\n    .yuddy-cs-slider-title {\n        font-size: 20px;\n    }\n}\n\n@media (max-width: 768px) {\n    .yuddy-cs-widget {\n        margin: 20px 0;\n    }\n\n    .yuddy-cs-slider-container {\n        padding: 0 4px;\n    }\n\n    .yuddy-cs_product-card {\n        flex: 0 0 calc(50% - 10px);\n        min-width: 150px;\n    }\n\n    .yuddy-cs-slider-title {\n        font-size: 18px;\n    }\n\n    .yuddy-cs-arrow {\n        width: 32px;\n        height: 32px;\n    }\n\n    .yuddy-cs-arrow svg {\n        width: 20px;\n        height: 20px;\n    }\n\n    .yuddy-cs-product-name {\n        font-size: 13px;\n        min-height: 20px;\n    }\n\n    .yuddy-cs-product-price {\n        font-size: 16px;\n    }\n\n    .yuddy-cs-product-original-price {\n        font-size: 14px;\n    }\n}\n\n@media (max-width: 480px) {\n    .yuddy-cs-slider-items {\n        gap: 2px;\n    }\n\n    .yuddy-cs_product-card {\n        min-width: 108px;\n    }\n\n    .yuddy-cs-product-info {\n        padding: 5px;\n    }\n}\n\n/* Grid Layout (Alternative) */\n.yuddy-cs-slider-container.grid-layout .yuddy-cs-slider-items {\n    display: grid;\n    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));\n    gap: 20px;\n}\n\n.yuddy-cs-slider-container.grid-layout .yuddy-cs-product-card {\n    flex: unset;\n}\n\n/* Loading State */\n.yuddy-cs-widget.loading {\n    opacity: 0.6;\n    pointer-events: none;\n}\n\n/* Animation */\n@keyframes slideIn {\n    from {\n        opacity: 0;\n        transform: translateY(20px);\n    }\n\n    to {\n        opacity: 1;\n        transform: translateY(0);\n    }\n}\n\n.yuddy-cs-widget {\n    animation: slideIn 0.3s ease-out;\n}";
     (function() {
