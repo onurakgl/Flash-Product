@@ -1,6 +1,6 @@
 /*!
  * Cart Suggestion Widget v1.0.0
- * Build Date: 02.05.2026 00:40:56
+ * Build Date: 02.05.2026 00:47:13
  * (c) 2026 Yuddy
  */
 var CartSuggestion = (function (exports) {
@@ -344,38 +344,32 @@ var CartSuggestion = (function (exports) {
         return platform;
     };
 
-    /** Ideasoft mağaza ürün path'i: /urun/{segment} */
-    function applyIdeasoftProductPath(pathname) {
+    /** Ideasoft ürün path'i — yalnızca platform ideasoft iken kullanılır */
+    function ideasoftPathFromPathname(pathname) {
         const inner = pathname.replace(/^\/+|\/+$/g, '');
         if (!inner)
             return '#';
         const path = `/${inner}`;
-        if (/^\/urun\//i.test(path)) {
-            return path;
-        }
-        return `/urun${path}`;
-    }
-    function relativeHrefDefault(slugPart) {
-        const t = slugPart.trim();
-        if (!t)
-            return '#';
-        return t.startsWith('/') ? t : `/${t}`;
+        return /^\/urun\//i.test(path) ? path : `/urun${path}`;
     }
     /**
-     * Kart href — slug veya url string olabilir; tam URL gelirse pathname düzeltilir (Ideasoft /urun/).
+     * Ürün kartı href. `/urun/` yalnızca Ideasoft'ta uygulanır.
+     * İkas ve diğer platformlar: tam URL aynen; göreli için sadece `/{slug}` (widget'ın önceki davranışı).
      */
     function buildCartProductHref(raw) {
         const input = raw?.trim();
         if (!input)
             return '#';
-        const platform = detectPlatform();
+        if (detectPlatform() !== 'ideasoft') {
+            if (input.startsWith('http://') || input.startsWith('https://')) {
+                return input;
+            }
+            return input.startsWith('/') ? input : `/${input}`;
+        }
         if (input.startsWith('http://') || input.startsWith('https://')) {
             try {
                 const u = new URL(input);
-                if (platform !== 'ideasoft') {
-                    return input;
-                }
-                const path = applyIdeasoftProductPath(u.pathname);
+                const path = ideasoftPathFromPathname(u.pathname);
                 if (path === '#')
                     return input;
                 return `${u.origin}${path}${u.search}${u.hash}`;
@@ -384,10 +378,7 @@ var CartSuggestion = (function (exports) {
                 return input;
             }
         }
-        if (platform === 'ideasoft') {
-            return applyIdeasoftProductPath(input);
-        }
-        return relativeHrefDefault(input);
+        return ideasoftPathFromPathname(input);
     }
 
     class APIClient {
