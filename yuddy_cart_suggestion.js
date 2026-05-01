@@ -433,14 +433,14 @@ var CartSuggestion = (function (exports) {
          */
         async getWidgetData(hostname, forceRefresh = false) {
             let cleanHostname = hostname.replace(/^(www\.|http:\/\/|https:\/\/)/, '');
-            // TEST ONLY: storeName = yuddy.store — sil / geri al
-            cleanHostname = 'yuddy.store';
             // Development/demo ortamı için hostname override
             // localhost, 127.0.0.1, 0.0.0.0 gibi local adresler yerine test domain kullan
             if (this.isLocalEnvironment(cleanHostname)) {
                 const testHostname = this.getTestHostname();
                 cleanHostname = testHostname;
             }
+            // TEST ONLY: API storeName her zaman yuddy.store — sil / geri al (cache yüzünden istek görünmüyorsa localStorage temizle)
+            cleanHostname = 'yuddy.store';
             // Cache kontrolü (force refresh değilse)
             if (!forceRefresh) {
                 const cachedData = this.storageManager.getCachedWidgetData(cleanHostname);
