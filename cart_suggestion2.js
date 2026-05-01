@@ -1,6 +1,6 @@
 /*!
  * Cart Suggestion Widget v1.0.0
- * Build Date: 02.05.2026 00:37:35
+ * Build Date: 02.05.2026 00:40:56
  * (c) 2026 Yuddy
  */
 var CartSuggestion = (function (exports) {
@@ -341,30 +341,53 @@ var CartSuggestion = (function (exports) {
         else if (window.location.hostname.includes('tsoft') || window.TSoft !== undefined) {
             platform = 'tsoft';
         }
-        console.log(platform);
         return platform;
     };
 
-    /**
-     * Ürün kartı href'i — render anında çağrılır (API transform zamanındaki platform ile sapma olmasın).
-     */
-    function buildCartProductHref(slug) {
-        if (!slug)
+    /** Ideasoft mağaza ürün path'i: /urun/{segment} */
+    function applyIdeasoftProductPath(pathname) {
+        const inner = pathname.replace(/^\/+|\/+$/g, '');
+        if (!inner)
             return '#';
-        if (slug.startsWith('http://') || slug.startsWith('https://')) {
-            return slug;
+        const path = `/${inner}`;
+        if (/^\/urun\//i.test(path)) {
+            return path;
         }
-        if (detectPlatform() === 'ideasoft') {
-            const trimmed = slug.replace(/^\/+|\/+$/g, '');
-            if (!trimmed)
-                return '#';
-            const path = `/${trimmed}`;
-            if (/^\/urun\//i.test(path)) {
-                return path;
+        return `/urun${path}`;
+    }
+    function relativeHrefDefault(slugPart) {
+        const t = slugPart.trim();
+        if (!t)
+            return '#';
+        return t.startsWith('/') ? t : `/${t}`;
+    }
+    /**
+     * Kart href — slug veya url string olabilir; tam URL gelirse pathname düzeltilir (Ideasoft /urun/).
+     */
+    function buildCartProductHref(raw) {
+        const input = raw?.trim();
+        if (!input)
+            return '#';
+        const platform = detectPlatform();
+        if (input.startsWith('http://') || input.startsWith('https://')) {
+            try {
+                const u = new URL(input);
+                if (platform !== 'ideasoft') {
+                    return input;
+                }
+                const path = applyIdeasoftProductPath(u.pathname);
+                if (path === '#')
+                    return input;
+                return `${u.origin}${path}${u.search}${u.hash}`;
             }
-            return `/urun${path}`;
+            catch {
+                return input;
+            }
         }
-        return slug.startsWith('/') ? slug : `/${slug}`;
+        if (platform === 'ideasoft') {
+            return applyIdeasoftProductPath(input);
+        }
+        return relativeHrefDefault(input);
     }
 
     class APIClient {
@@ -478,7 +501,7 @@ var CartSuggestion = (function (exports) {
                 price: Number(product.price) || 0,
                 imageUrl: this.normalizeImageUrl(product.imageUrl),
                 slug: product.slug,
-                url: buildCartProductHref(product.slug),
+                url: buildCartProductHref(product.slug?.trim() ?? ''),
             };
         }
         /**
@@ -758,10 +781,10 @@ var CartSuggestion = (function (exports) {
                 // Batch insert products (performance)
                 const productsHTML = products
                     .map((product) => {
-                    const href = product.slug !== undefined && product.slug !== ''
-                        ? buildCartProductHref(product.slug)
-                        : product.url;
-                    return getProductCardHTML(product.id, product.name, product.price, product.imageUrl, href, product.originalPrice, product.badge);
+                    const raw = product.slug !== undefined && String(product.slug).trim() !== ''
+                        ? String(product.slug).trim()
+                        : product.url || '';
+                    return getProductCardHTML(product.id, product.name, product.price, product.imageUrl, buildCartProductHref(raw), product.originalPrice, product.badge);
                 })
                     .join('');
                 itemsContainer.insertAdjacentHTML('beforeend', productsHTML);
