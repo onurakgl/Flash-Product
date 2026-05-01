@@ -1,6 +1,6 @@
 /*!
  * Cart Suggestion Widget v1.0.0
- * Build Date: 02.05.2026 00:10:24
+ * Build Date: 02.05.2026 00:37:35
  * (c) 2026 Yuddy
  */
 var CartSuggestion = (function (exports) {
@@ -322,26 +322,50 @@ var CartSuggestion = (function (exports) {
         if (typeof window === 'undefined' || typeof document === 'undefined') {
             return 'other';
         }
+        let platform = 'other';
         if (window.IdeasoftSettings !== undefined ||
             document.querySelector('script[src*="ideasoft"]') !== null ||
             window.location.hostname.includes('ideasoft')) {
-            return 'ideasoft';
+            platform = 'ideasoft';
         }
-        if (window.IKAS !== undefined ||
+        else if (window.IKAS !== undefined ||
             document.querySelector('script[src*="ikas"]') !== null ||
             window.location.hostname.includes('ikas')) {
-            return 'ikas';
+            platform = 'ikas';
         }
-        if (window.Shopify !== undefined ||
+        else if (window.Shopify !== undefined ||
             document.querySelector('script[src*="shopify"]') !== null ||
             document.querySelector('meta[name="shopify-checkout-api-token"]') !== null) {
-            return 'shopify';
+            platform = 'shopify';
         }
-        if (window.location.hostname.includes('tsoft') || window.TSoft !== undefined) {
-            return 'tsoft';
+        else if (window.location.hostname.includes('tsoft') || window.TSoft !== undefined) {
+            platform = 'tsoft';
         }
-        return 'other';
+        console.log(platform);
+        return platform;
     };
+
+    /**
+     * Ürün kartı href'i — render anında çağrılır (API transform zamanındaki platform ile sapma olmasın).
+     */
+    function buildCartProductHref(slug) {
+        if (!slug)
+            return '#';
+        if (slug.startsWith('http://') || slug.startsWith('https://')) {
+            return slug;
+        }
+        if (detectPlatform() === 'ideasoft') {
+            const trimmed = slug.replace(/^\/+|\/+$/g, '');
+            if (!trimmed)
+                return '#';
+            const path = `/${trimmed}`;
+            if (/^\/urun\//i.test(path)) {
+                return path;
+            }
+            return `/urun${path}`;
+        }
+        return slug.startsWith('/') ? slug : `/${slug}`;
+    }
 
     class APIClient {
         constructor(baseUrl, cacheTTL = 60) {
@@ -447,36 +471,14 @@ var CartSuggestion = (function (exports) {
                 return `https:${imageUrl}`;
             return imageUrl;
         }
-        /**
-         * İkas ve diğer platformlar: relative slug için sadece başına / eklenir (eski davranış).
-         * Ideasoft: /urun/{slug} (zaten /urun/ ile geliyorsa dokunulmaz).
-         */
-        buildProductUrl(slug, platform) {
-            if (!slug)
-                return '#';
-            if (slug.startsWith('http://') || slug.startsWith('https://')) {
-                return slug;
-            }
-            if (platform === 'ideasoft') {
-                const trimmed = slug.replace(/^\/+|\/+$/g, '');
-                if (!trimmed)
-                    return '#';
-                const path = `/${trimmed}`;
-                if (/^\/urun\//i.test(path)) {
-                    return path;
-                }
-                return `/urun${path}`;
-            }
-            const normalizedSlug = slug.startsWith('/') ? slug : `/${slug}`;
-            return normalizedSlug;
-        }
-        transformApplicableProductToWidgetProduct(product, platform) {
+        transformApplicableProductToWidgetProduct(product) {
             return {
                 id: product.id,
                 name: product.name,
                 price: Number(product.price) || 0,
                 imageUrl: this.normalizeImageUrl(product.imageUrl),
-                url: this.buildProductUrl(product.slug, platform),
+                slug: product.slug,
+                url: buildCartProductHref(product.slug),
             };
         }
         /**
@@ -495,11 +497,10 @@ var CartSuggestion = (function (exports) {
                 slider1: null,
                 slider2: null,
             };
-            const platform = detectPlatform();
             // API'den gelen applicableProducts listesini doğrudan kullan
             for (const category of apiResponse) {
                 const applicableProducts = (category.applicableProducts || []).filter((product) => product.status !== false);
-                const products = sortProductsByOrder(applicableProducts.map((product) => this.transformApplicableProductToWidgetProduct(product, platform)), category.sliderSettings?.productOrder);
+                const products = sortProductsByOrder(applicableProducts.map((product) => this.transformApplicableProductToWidgetProduct(product)), category.sliderSettings?.productOrder);
                 // Ürün listesi boşsa öneri alanı oluşturulmaz
                 if (products.length === 0) {
                     continue;
@@ -755,7 +756,14 @@ var CartSuggestion = (function (exports) {
             if (itemsContainer) {
                 itemsContainer.innerHTML = '';
                 // Batch insert products (performance)
-                const productsHTML = products.map(product => getProductCardHTML(product.id, product.name, product.price, product.imageUrl, product.url, product.originalPrice, product.badge)).join('');
+                const productsHTML = products
+                    .map((product) => {
+                    const href = product.slug !== undefined && product.slug !== ''
+                        ? buildCartProductHref(product.slug)
+                        : product.url;
+                    return getProductCardHTML(product.id, product.name, product.price, product.imageUrl, href, product.originalPrice, product.badge);
+                })
+                    .join('');
                 itemsContainer.insertAdjacentHTML('beforeend', productsHTML);
             }
             // Stil ayarlarını uygula (DUPLICATE FIX)
