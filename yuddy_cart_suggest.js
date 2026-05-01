@@ -1,6 +1,6 @@
 /*!
  * Cart Suggestion Widget v1.0.0
- * Build Date: 02.05.2026 00:27:38
+ * Build Date: 02.05.2026 00:47:13
  * (c) 2026 Yuddy
  */
 var CartSuggestion = (function (exports) {
@@ -322,47 +322,63 @@ var CartSuggestion = (function (exports) {
         if (typeof window === 'undefined' || typeof document === 'undefined') {
             return 'other';
         }
+        let platform = 'other';
         if (window.IdeasoftSettings !== undefined ||
             document.querySelector('script[src*="ideasoft"]') !== null ||
             window.location.hostname.includes('ideasoft')) {
-            return 'ideasoft';
+            platform = 'ideasoft';
         }
-        if (window.IKAS !== undefined ||
+        else if (window.IKAS !== undefined ||
             document.querySelector('script[src*="ikas"]') !== null ||
             window.location.hostname.includes('ikas')) {
-            return 'ikas';
+            platform = 'ikas';
         }
-        if (window.Shopify !== undefined ||
+        else if (window.Shopify !== undefined ||
             document.querySelector('script[src*="shopify"]') !== null ||
             document.querySelector('meta[name="shopify-checkout-api-token"]') !== null) {
-            return 'shopify';
+            platform = 'shopify';
         }
-        if (window.location.hostname.includes('tsoft') || window.TSoft !== undefined) {
-            return 'tsoft';
+        else if (window.location.hostname.includes('tsoft') || window.TSoft !== undefined) {
+            platform = 'tsoft';
         }
-        return 'other';
+        return platform;
     };
 
-    /**
-     * Ürün kartı href'i — render anında çağrılır (API transform zamanındaki platform ile sapma olmasın).
-     */
-    function buildCartProductHref(slug) {
-        if (!slug)
+    /** Ideasoft ürün path'i — yalnızca platform ideasoft iken kullanılır */
+    function ideasoftPathFromPathname(pathname) {
+        const inner = pathname.replace(/^\/+|\/+$/g, '');
+        if (!inner)
             return '#';
-        if (slug.startsWith('http://') || slug.startsWith('https://')) {
-            return slug;
-        }
-        if (detectPlatform() === 'ideasoft') {
-            const trimmed = slug.replace(/^\/+|\/+$/g, '');
-            if (!trimmed)
-                return '#';
-            const path = `/${trimmed}`;
-            if (/^\/urun\//i.test(path)) {
-                return path;
+        const path = `/${inner}`;
+        return /^\/urun\//i.test(path) ? path : `/urun${path}`;
+    }
+    /**
+     * Ürün kartı href. `/urun/` yalnızca Ideasoft'ta uygulanır.
+     * İkas ve diğer platformlar: tam URL aynen; göreli için sadece `/{slug}` (widget'ın önceki davranışı).
+     */
+    function buildCartProductHref(raw) {
+        const input = raw?.trim();
+        if (!input)
+            return '#';
+        if (detectPlatform() !== 'ideasoft') {
+            if (input.startsWith('http://') || input.startsWith('https://')) {
+                return input;
             }
-            return `/urun${path}`;
+            return input.startsWith('/') ? input : `/${input}`;
         }
-        return slug.startsWith('/') ? slug : `/${slug}`;
+        if (input.startsWith('http://') || input.startsWith('https://')) {
+            try {
+                const u = new URL(input);
+                const path = ideasoftPathFromPathname(u.pathname);
+                if (path === '#')
+                    return input;
+                return `${u.origin}${path}${u.search}${u.hash}`;
+            }
+            catch {
+                return input;
+            }
+        }
+        return ideasoftPathFromPathname(input);
     }
 
     class APIClient {
@@ -417,6 +433,8 @@ var CartSuggestion = (function (exports) {
          */
         async getWidgetData(hostname, forceRefresh = false) {
             let cleanHostname = hostname.replace(/^(www\.|http:\/\/|https:\/\/)/, '');
+            // TEST ONLY: storeName = yuddy.store — sil / geri al
+            cleanHostname = 'yuddy.store';
             // Development/demo ortamı için hostname override
             // localhost, 127.0.0.1, 0.0.0.0 gibi local adresler yerine test domain kullan
             if (this.isLocalEnvironment(cleanHostname)) {
@@ -476,7 +494,7 @@ var CartSuggestion = (function (exports) {
                 price: Number(product.price) || 0,
                 imageUrl: this.normalizeImageUrl(product.imageUrl),
                 slug: product.slug,
-                url: buildCartProductHref(product.slug),
+                url: buildCartProductHref(product.slug?.trim() ?? ''),
             };
         }
         /**
@@ -756,10 +774,10 @@ var CartSuggestion = (function (exports) {
                 // Batch insert products (performance)
                 const productsHTML = products
                     .map((product) => {
-                    const href = product.slug !== undefined && product.slug !== ''
-                        ? buildCartProductHref(product.slug)
-                        : product.url;
-                    return getProductCardHTML(product.id, product.name, product.price, product.imageUrl, href, product.originalPrice, product.badge);
+                    const raw = product.slug !== undefined && String(product.slug).trim() !== ''
+                        ? String(product.slug).trim()
+                        : product.url || '';
+                    return getProductCardHTML(product.id, product.name, product.price, product.imageUrl, buildCartProductHref(raw), product.originalPrice, product.badge);
                 })
                     .join('');
                 itemsContainer.insertAdjacentHTML('beforeend', productsHTML);
