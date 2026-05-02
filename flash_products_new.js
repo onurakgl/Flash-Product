@@ -1,6 +1,6 @@
 /*!
  * Flash Products Widget v1.0.0
- * Build Date: 02.05.2026 22:55:25
+ * Build Date: 02.05.2026 23:45:21
  * (c) 2026 Yuddy
  */
 var FlashProducts = (function (exports) {
@@ -525,14 +525,48 @@ var FlashProducts = (function (exports) {
         el.remove();
     }
 
+    /** Ideasoft ürün path'i — yalnızca platform ideasoft iken kullanılır (cart suggestion ile aynı). */
+    function ideasoftPathFromPathname(pathname) {
+        const inner = pathname.replace(/^\/+|\/+$/g, '');
+        if (!inner)
+            return '#';
+        const path = `/${inner}`;
+        return /^\/urun\//i.test(path) ? path : `/urun${path}`;
+    }
+    /**
+     * Ürün kartı href. `/urun/` yalnızca Ideasoft'ta uygulanır.
+     * İkas ve diğer platformlar: göreli için `/{slug}` veya tam URL aynen.
+     */
+    function buildFlashProductHref(raw, platform) {
+        const input = raw?.trim();
+        if (!input)
+            return '#';
+        const p = platform ?? detectPlatform();
+        if (p !== 'ideasoft') {
+            if (input.startsWith('http://') || input.startsWith('https://')) {
+                return input;
+            }
+            return input.startsWith('/') ? input : `/${input}`;
+        }
+        if (input.startsWith('http://') || input.startsWith('https://')) {
+            try {
+                const u = new URL(input);
+                const path = ideasoftPathFromPathname(u.pathname);
+                if (path === '#')
+                    return input;
+                return `${u.origin}${path}${u.search}${u.hash}`;
+            }
+            catch {
+                return input;
+            }
+        }
+        return ideasoftPathFromPathname(input);
+    }
+
     function escapeHtml(s) {
         const div = document.createElement('div');
         div.textContent = s;
         return div.innerHTML;
-    }
-    function productLink(slug) {
-        const path = slug.startsWith('/') ? slug : `/${slug}`;
-        return path;
     }
     function formatPrice(value) {
         // 199.99 -> "199.99", 599.00 -> "599"
@@ -540,11 +574,11 @@ var FlashProducts = (function (exports) {
         return fixed.replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
     }
     /** Build product card HTML for one item */
-    function buildProductCard(item, settings) {
+    function buildProductCard(item, settings, platform) {
         const nameColor = settings.productNameColor || '#1a1a1a';
         const priceColor = settings.productPriceColor || '#e65100';
         const cardBg = settings.productCardBackgroundColor || '#ffffff';
-        const href = productLink(item.slug || '');
+        const href = buildFlashProductHref(item.slug || '', platform);
         const name = escapeHtml(item.name || '');
         const imgUrl = item.imageUrl || '';
         const priceValue = typeof item.price === 'number' && Number.isFinite(item.price) ? item.price : null;
@@ -565,7 +599,7 @@ var FlashProducts = (function (exports) {
   `;
     }
     /** Build full section HTML */
-    function buildSectionHTML(data) {
+    function buildSectionHTML(data, platform) {
         const settings = data.flashProductGeneralSettings || {};
         const products = settings.applicableProducts || [];
         const bg = settings.backgroundColor || '#fff3e0';
@@ -573,7 +607,7 @@ var FlashProducts = (function (exports) {
         const title = settings.title || 'Flash Ürünler';
         const titleIcon = settings.titleIcon || '⚡';
         const titlePosition = settings.titlePosition === 'center' ? 'center' : 'flex-start';
-        const cardsHtml = products.map((item) => buildProductCard(item, settings)).join('');
+        const cardsHtml = products.map((item) => buildProductCard(item, settings, platform)).join('');
         const iconHtml = !titleIcon.includes(':')
             ? `<span class="${FLASH_PRODUCTS_SECTION_CLASS}__title-icon" style="color:${escapeHtml(titleColor)}">${escapeHtml(titleIcon)}</span>`
             : '';
@@ -765,7 +799,7 @@ var FlashProducts = (function (exports) {
                 },
             };
             const position = settings.flashBlockPositionRange ?? 1;
-            const html = buildSectionHTML(renderData);
+            const html = buildSectionHTML(renderData, this.platform);
             injectSection(html, position, this.platform);
             const section = document.getElementById(SECTION_ID);
             attachListArrowListeners(section);
@@ -867,6 +901,7 @@ var FlashProducts = (function (exports) {
     exports.FlashProducts = FlashProducts;
     exports.IDEASOFT_ENTRY_ROW_PREFIX = IDEASOFT_ENTRY_ROW_PREFIX;
     exports.IDEASOFT_MAX_ENTRY_ROW_INDEX = IDEASOFT_MAX_ENTRY_ROW_INDEX;
+    exports.buildFlashProductHref = buildFlashProductHref;
     exports.collectIdeasoftEntryRowsSorted = collectIdeasoftEntryRowsSorted;
     exports.default = FlashProducts;
     exports.detectPlatform = detectPlatform;
