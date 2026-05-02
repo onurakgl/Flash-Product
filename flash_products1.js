@@ -1,12 +1,12 @@
 /*!
  * Flash Products Widget v1.0.0
- * Build Date: 31.03.2026 17:38:11
+ * Build Date: 02.05.2026 22:40:29
  * (c) 2026 Yuddy
  */
 var FlashProducts = (function (exports) {
     'use strict';
 
-    globalThis.__BUILD_ENV__ = 'production';
+    globalThis.__BUILD_ENV__ = '';
 
     const CACHE_KEY_PREFIX = 'yuddy_fp_';
     // Kısa TTL: panelden kayıt sonrası yeni updateDate / counter hızlı yansısın (sayaç ankeri güncellensin)
@@ -67,7 +67,7 @@ var FlashProducts = (function (exports) {
          * Uses cache (10 min TTL) unless forceRefresh is true.
          */
         async getFlashProduct(storeName, forceRefresh = false) {
-            let hostname = 'tanadore.com';
+            let hostname = storeName || this.getHostname();
             if (this.isLocal(hostname)) {
                 hostname = (typeof window !== 'undefined' && window.YUDDY_FLASH_PRODUCTS_TEST_HOSTNAME) || 'yuddy.store';
             }
@@ -122,9 +122,13 @@ var FlashProducts = (function (exports) {
                     {
                         id: 'demo-1',
                         name: 'Demo Ürün 1',
+                        sku: 'SKU-1',
                         imageUrl: 'https://picsum.photos/seed/fp1/400/400',
                         slug: 'demo-urun-1',
                         price: 199.99,
+                        currencyCode: 'TRY',
+                        currencySymbol: '₺',
+                        status: true,
                     },
                     {
                         id: 'demo-2',
@@ -132,6 +136,8 @@ var FlashProducts = (function (exports) {
                         imageUrl: 'https://picsum.photos/seed/fp2/400/400',
                         slug: 'demo-urun-2',
                         price: 349.5,
+                        currencySymbol: '₺',
+                        status: true,
                     },
                     {
                         id: 'demo-3',
@@ -139,6 +145,8 @@ var FlashProducts = (function (exports) {
                         imageUrl: 'https://picsum.photos/seed/fp3/400/400',
                         slug: 'demo-urun-3',
                         price: 129.0,
+                        currencySymbol: '₺',
+                        status: true,
                     },
                     {
                         id: 'demo-4',
@@ -146,6 +154,8 @@ var FlashProducts = (function (exports) {
                         imageUrl: 'https://picsum.photos/seed/fp4/400/400',
                         slug: 'demo-urun-4',
                         price: 599.0,
+                        currencySymbol: '₺',
+                        status: true,
                     },
                     {
                         id: 'demo-5',
@@ -153,6 +163,8 @@ var FlashProducts = (function (exports) {
                         imageUrl: 'https://picsum.photos/seed/fp5/400/400',
                         slug: 'demo-urun-5',
                         price: 89.99,
+                        currencySymbol: '₺',
+                        status: true,
                     },
                     {
                         id: 'demo-6',
@@ -160,14 +172,260 @@ var FlashProducts = (function (exports) {
                         imageUrl: 'https://picsum.photos/seed/fp6/400/400',
                         slug: 'demo-urun-6',
                         price: 219.99,
+                        currencySymbol: '₺',
+                        status: true,
                     },
                 ],
             },
         };
     }
 
-    const SECTION_ID$1 = 'yuddy-flash-products-section';
-    const SECTION_CLASS = 'yuddy-flash-products';
+    /**
+     * Flash Products’un gösterileceği URL’ler — `index.ts` otomatik init ile aynı olmalı.
+     */
+    function isFlashProductsHomepagePath() {
+        if (typeof window === 'undefined')
+            return false;
+        if (window.YUDDY_FLASH_PRODUCTS_DEMO === true) {
+            return true;
+        }
+        const path = window.location.pathname.replace(/\/+$/, '') || '/';
+        const pathLower = path.toLowerCase();
+        if (pathLower.startsWith('/demo'))
+            return true;
+        const homePaths = ['', '/', '/home', '/index', '/anasayfa'];
+        return homePaths.includes(pathLower);
+    }
+
+    /** DOM — tek kaynak (dom-renderer + dom-insertion) */
+    const FLASH_PRODUCTS_SECTION_ID = 'yuddy-flash-products-section';
+    const FLASH_PRODUCTS_SECTION_CLASS = 'yuddy-flash-products';
+
+    /** Ideasoft ana sayfa satır kökü — `entry-row-1`, `entry-row-2`, … */
+    const IDEASOFT_ENTRY_ROW_PREFIX = 'entry-row';
+    /** API `flashBlockPositionRange` ile uyum için üst sınır (entry-row-N indeksi). */
+    const IDEASOFT_MAX_ENTRY_ROW_INDEX = 99;
+    const MAIN_FALLBACK_SELECTORS = [
+        'main',
+        '[role="main"]',
+        '#main',
+        '.main',
+        '.main-content',
+        '#content',
+        '.content',
+        '.page-content',
+        '#__next',
+        '#root',
+        '#idea-wrapper',
+        '#idea-main-content',
+        '.idea-main-content',
+    ];
+    /** Ideasoft’ta main içerik kapsayıcıları (Ikas’taki liste ile birleştirilmez — yalnız ideasoft fallback önceliği). */
+    const IDEASOFT_MAIN_FALLBACK_EXTRA = [
+        '#idea-wrapper',
+        '#idea-main-content',
+        '.idea-main-content',
+        '.idea-container',
+        '#content-main',
+    ];
+    function mergeMainFallbackSelectors(platform) {
+        if (platform !== 'ideasoft') {
+            return [...MAIN_FALLBACK_SELECTORS];
+        }
+        return Array.from(new Set([...IDEASOFT_MAIN_FALLBACK_EXTRA, ...MAIN_FALLBACK_SELECTORS]));
+    }
+    function resolveFirstMatch(selectors) {
+        if (typeof document === 'undefined')
+            return null;
+        for (const sel of selectors) {
+            try {
+                const el = document.querySelector(sel);
+                if (el)
+                    return el;
+            }
+            catch {
+                /* invalid selector — skip */
+            }
+        }
+        return null;
+    }
+    /**
+     * Ideasoft `entry-row-{n}` satır elemanı (id, class veya class token).
+     * n: 1, 2, 3, …
+     */
+    function resolveIdeasoftEntryRow(rowNumber) {
+        if (rowNumber < 1 || !Number.isFinite(rowNumber))
+            return null;
+        const n = Math.min(IDEASOFT_MAX_ENTRY_ROW_INDEX, Math.floor(rowNumber));
+        const base = `${IDEASOFT_ENTRY_ROW_PREFIX}-${n}`;
+        return resolveFirstMatch([
+            `#${base}`,
+            `[id="${base}"]`,
+            `.${base}`,
+            `[class~="${base}"]`,
+        ]);
+    }
+
+    /**
+     * Flash Products widget — mağaza platformu algılama (cart suggestion ile uyumlu sıra).
+     * Test / demo: `window.YUDDY_FLASH_PRODUCTS_PLATFORM = 'ideasoft' | 'ikas' | 'other'`
+     */
+    function detectPlatform() {
+        if (typeof window === 'undefined' || typeof document === 'undefined') {
+            return 'other';
+        }
+        const forced = window
+            .YUDDY_FLASH_PRODUCTS_PLATFORM;
+        if (forced === 'ikas' || forced === 'ideasoft' || forced === 'other') {
+            return forced;
+        }
+        if (window.IdeasoftSettings !== undefined ||
+            document.querySelector('script[src*="ideasoft"]') !== null ||
+            window.location.hostname.includes('ideasoft')) {
+            return 'ideasoft';
+        }
+        if (window.IKAS !== undefined ||
+            document.querySelector('script[src*="ikas"]') !== null ||
+            window.location.hostname.includes('ikas')) {
+            return 'ikas';
+        }
+        return 'other';
+    }
+
+    /**
+     * Ideasoft: `entry-row-1`, `entry-row-2`, … ile hizalı yerleşim (Ikas id="0"… ile aynı anlam).
+     * - range 0 → ilk satırdan önce (`entry-row-1` öncesi)
+     * - range k (k≥1) → `entry-row-k` satırından sonra (modül, k. ile k+1. satır arasına düşer)
+     */
+    function findInsertionPointIdeasoft(flashBlockPositionRange) {
+        const range = Math.max(0, Math.min(IDEASOFT_MAX_ENTRY_ROW_INDEX, flashBlockPositionRange));
+        if (range === 0) {
+            const anchor = resolveIdeasoftEntryRow(1);
+            if (anchor?.parentElement) {
+                return { parent: anchor.parentElement, index: 0, insertBefore: anchor };
+            }
+            return null;
+        }
+        const anchor = resolveIdeasoftEntryRow(range);
+        if (anchor?.parentElement) {
+            return { parent: anchor.parentElement, index: range, insertAfter: anchor };
+        }
+        return null;
+    }
+    /**
+     * Ikas — sayfa alanları id="0", id="1", … (mevcut davranış, değiştirilmedi).
+     */
+    function findInsertionPointIkasNumeric(flashBlockPositionRange) {
+        const range = Math.max(0, Math.min(9, flashBlockPositionRange));
+        if (range === 0) {
+            const anchor = document.getElementById('0');
+            if (anchor?.parentElement) {
+                return { parent: anchor.parentElement, index: 0, insertBefore: anchor };
+            }
+        }
+        else {
+            const anchorId = String(range - 1);
+            const anchor = document.getElementById(anchorId);
+            if (anchor?.parentElement) {
+                return { parent: anchor.parentElement, index: range, insertAfter: anchor };
+            }
+        }
+        return null;
+    }
+    function findInsertionPointMainFallback(flashBlockPositionRange, platform) {
+        const range = Math.max(0, Math.min(9, flashBlockPositionRange));
+        const mainSelectors = mergeMainFallbackSelectors(platform);
+        for (const sel of mainSelectors) {
+            let main = null;
+            try {
+                main = document.querySelector(sel);
+            }
+            catch {
+                continue;
+            }
+            if (!main)
+                continue;
+            const children = Array.from(main.children).filter((el) => {
+                const tag = el.tagName.toLowerCase();
+                const role = el.getAttribute('role');
+                const id = (el.id || '').toLowerCase();
+                if (tag === 'header' ||
+                    tag === 'footer' ||
+                    role === 'banner' ||
+                    id.includes('header') ||
+                    id.includes('footer')) {
+                    return false;
+                }
+                return true;
+            });
+            if (children.length === 0) {
+                return { parent: main, index: 0 };
+            }
+            const index = Math.min(range, children.length);
+            if (index === 0) {
+                return { parent: main, index: 0 };
+            }
+            return { parent: main, index, insertAfter: children[index - 1] };
+        }
+        const body = document.body;
+        const firstMain = body.querySelector('main, #main, .main, [role="main"], #idea-wrapper, #idea-main-content') ||
+            body;
+        return { parent: firstMain, index: 0 };
+    }
+    /**
+     * Sayfa alanları:
+     * - Ikas / other: id="0"… önce, sonra generic main fallback.
+     * - Ideasoft: önce `entry-row-{n}` köprüleri, sonra Ideasoft-ağırlıklı main fallback (Ikas numeric id yok).
+     */
+    function findInsertionPoint(flashBlockPositionRange, platform) {
+        if (platform === 'ideasoft') {
+            const idea = findInsertionPointIdeasoft(flashBlockPositionRange);
+            if (idea)
+                return idea;
+            return findInsertionPointMainFallback(flashBlockPositionRange, platform);
+        }
+        const ikasPoint = findInsertionPointIkasNumeric(flashBlockPositionRange);
+        if (ikasPoint)
+            return ikasPoint;
+        return findInsertionPointMainFallback(flashBlockPositionRange, platform);
+    }
+    /** Insert section into DOM */
+    function injectSection(html, flashBlockPositionRange, platform) {
+        removeSection();
+        const p = platform ?? detectPlatform();
+        const point = findInsertionPoint(flashBlockPositionRange, p);
+        if (!point)
+            return;
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = html.trim();
+        const section = wrapper.firstElementChild;
+        if (!section)
+            return;
+        const { parent, index, insertAfter, insertBefore } = point;
+        if (insertBefore) {
+            parent.insertBefore(section, insertBefore);
+        }
+        else if (insertAfter) {
+            insertAfter.insertAdjacentElement('afterend', section);
+        }
+        else if (index === 0 && parent.firstChild) {
+            parent.insertBefore(section, parent.firstChild);
+        }
+        else {
+            parent.appendChild(section);
+        }
+    }
+    function removeSection() {
+        const el = document.getElementById(FLASH_PRODUCTS_SECTION_ID);
+        if (!el)
+            return;
+        const intervalId = el
+            .__yuddyFpCountdownInterval;
+        if (intervalId)
+            clearInterval(intervalId);
+        el.remove();
+    }
+
     function escapeHtml(s) {
         const div = document.createElement('div');
         div.textContent = s;
@@ -192,14 +450,17 @@ var FlashProducts = (function (exports) {
         const imgUrl = item.imageUrl || '';
         const priceValue = typeof item.price === 'number' && Number.isFinite(item.price) ? item.price : null;
         const priceText = priceValue != null ? formatPrice(priceValue) : '-';
+        const currencyDisplay = (item.currencySymbol && item.currencySymbol.trim()) ||
+            (item.currencyCode && item.currencyCode.trim()) ||
+            '₺';
         return `
-    <a href="${escapeHtml(href)}" class="${SECTION_CLASS}__card" style="background-color:${escapeHtml(cardBg)};">
-      <div class="${SECTION_CLASS}__card-image-wrap">
-        ${imgUrl ? `<img class="${SECTION_CLASS}__card-image" src="${escapeHtml(imgUrl)}" alt="${name}" loading="lazy" />` : `<div class="${SECTION_CLASS}__card-image-placeholder"></div>`}
+    <a href="${escapeHtml(href)}" class="${FLASH_PRODUCTS_SECTION_CLASS}__card" style="background-color:${escapeHtml(cardBg)};">
+      <div class="${FLASH_PRODUCTS_SECTION_CLASS}__card-image-wrap">
+        ${imgUrl ? `<img class="${FLASH_PRODUCTS_SECTION_CLASS}__card-image" src="${escapeHtml(imgUrl)}" alt="${name}" loading="lazy" />` : `<div class="${FLASH_PRODUCTS_SECTION_CLASS}__card-image-placeholder"></div>`}
       </div>
-      <div class="${SECTION_CLASS}__card-body">
-        <span class="${SECTION_CLASS}__card-name" style="color:${escapeHtml(nameColor)}">${name}</span>
-        <span class="${SECTION_CLASS}__card-price" style="color:${escapeHtml(priceColor)}">${escapeHtml(priceText)} ₺</span>
+      <div class="${FLASH_PRODUCTS_SECTION_CLASS}__card-body">
+        <span class="${FLASH_PRODUCTS_SECTION_CLASS}__card-name" style="color:${escapeHtml(nameColor)}">${name}</span>
+        <span class="${FLASH_PRODUCTS_SECTION_CLASS}__card-price" style="color:${escapeHtml(priceColor)}">${escapeHtml(priceText)} ${escapeHtml(currencyDisplay)}</span>
       </div>
     </a>
   `;
@@ -215,10 +476,10 @@ var FlashProducts = (function (exports) {
         const titlePosition = settings.titlePosition === 'center' ? 'center' : 'flex-start';
         const cardsHtml = products.map((item) => buildProductCard(item, settings)).join('');
         const iconHtml = !titleIcon.includes(':')
-            ? `<span class="${SECTION_CLASS}__title-icon" style="color:${escapeHtml(titleColor)}">${escapeHtml(titleIcon)}</span>`
+            ? `<span class="${FLASH_PRODUCTS_SECTION_CLASS}__title-icon" style="color:${escapeHtml(titleColor)}">${escapeHtml(titleIcon)}</span>`
             : '';
         const hasScroll = products.length > 4;
-        const sectionModifier = hasScroll ? ` ${SECTION_CLASS}--scrollable` : '';
+        const sectionModifier = hasScroll ? ` ${FLASH_PRODUCTS_SECTION_CLASS}--scrollable` : '';
         const counterHours = Math.max(0, Math.min(999, settings.counter ?? 24));
         const updateDateIso = data.updateDate != null && String(data.updateDate).trim() !== ''
             ? String(data.updateDate).trim()
@@ -230,33 +491,33 @@ var FlashProducts = (function (exports) {
             return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
         };
         return `
-    <section id="${SECTION_ID$1}" class="${SECTION_CLASS}${sectionModifier}" style="background-color:${escapeHtml(bg)};" data-counter-hours="${counterHours}" data-update-date="${escapeHtml(updateDateIso)}">
-      <div class="${SECTION_CLASS}__header" style="justify-content:${titlePosition};">
-        <div class="${SECTION_CLASS}__header-left">
+    <section id="${FLASH_PRODUCTS_SECTION_ID}" class="${FLASH_PRODUCTS_SECTION_CLASS}${sectionModifier}" style="background-color:${escapeHtml(bg)};" data-counter-hours="${counterHours}" data-update-date="${escapeHtml(updateDateIso)}">
+      <div class="${FLASH_PRODUCTS_SECTION_CLASS}__header" style="justify-content:${titlePosition};">
+        <div class="${FLASH_PRODUCTS_SECTION_CLASS}__header-left">
           ${iconHtml}
-          <h2 class="${SECTION_CLASS}__title" style="color:${escapeHtml(titleColor)}">${escapeHtml(title)}</h2>
+          <h2 class="${FLASH_PRODUCTS_SECTION_CLASS}__title" style="color:${escapeHtml(titleColor)}">${escapeHtml(title)}</h2>
         </div>
-        <div class="${SECTION_CLASS}__countdown" style="color:${escapeHtml(titleColor)}" aria-live="polite" aria-label="Kampanya bitiş sayacı">
-          <div class="${SECTION_CLASS}__countdown-card" aria-hidden="true">
-            <span class="${SECTION_CLASS}__countdown-card-value" data-unit="h">--</span>
-            <span class="${SECTION_CLASS}__countdown-card-label">Saat</span>
+        <div class="${FLASH_PRODUCTS_SECTION_CLASS}__countdown" style="color:${escapeHtml(titleColor)}" aria-live="polite" aria-label="Kampanya bitiş sayacı">
+          <div class="${FLASH_PRODUCTS_SECTION_CLASS}__countdown-card" aria-hidden="true">
+            <span class="${FLASH_PRODUCTS_SECTION_CLASS}__countdown-card-value" data-unit="h">--</span>
+            <span class="${FLASH_PRODUCTS_SECTION_CLASS}__countdown-card-label">Saat</span>
           </div>
-          <div class="${SECTION_CLASS}__countdown-card" aria-hidden="true">
-            <span class="${SECTION_CLASS}__countdown-card-value" data-unit="m">--</span>
-            <span class="${SECTION_CLASS}__countdown-card-label">Dk</span>
+          <div class="${FLASH_PRODUCTS_SECTION_CLASS}__countdown-card" aria-hidden="true">
+            <span class="${FLASH_PRODUCTS_SECTION_CLASS}__countdown-card-value" data-unit="m">--</span>
+            <span class="${FLASH_PRODUCTS_SECTION_CLASS}__countdown-card-label">Dk</span>
           </div>
-          <div class="${SECTION_CLASS}__countdown-card" aria-hidden="true">
-            <span class="${SECTION_CLASS}__countdown-card-value" data-unit="s">--</span>
-            <span class="${SECTION_CLASS}__countdown-card-label">Sn</span>
+          <div class="${FLASH_PRODUCTS_SECTION_CLASS}__countdown-card" aria-hidden="true">
+            <span class="${FLASH_PRODUCTS_SECTION_CLASS}__countdown-card-value" data-unit="s">--</span>
+            <span class="${FLASH_PRODUCTS_SECTION_CLASS}__countdown-card-label">Sn</span>
           </div>
         </div>
       </div>
-      <div class="${SECTION_CLASS}__list-wrapper">
-        <button type="button" class="${SECTION_CLASS}__arrow ${SECTION_CLASS}__arrow--prev" aria-label="Önceki ürünler">${arrowSvg('left')}</button>
-        <div class="${SECTION_CLASS}__list" role="list" aria-label="${escapeHtml(title)} ürün listesi">
+      <div class="${FLASH_PRODUCTS_SECTION_CLASS}__list-wrapper">
+        <button type="button" class="${FLASH_PRODUCTS_SECTION_CLASS}__arrow ${FLASH_PRODUCTS_SECTION_CLASS}__arrow--prev" aria-label="Önceki ürünler">${arrowSvg('left')}</button>
+        <div class="${FLASH_PRODUCTS_SECTION_CLASS}__list" role="list" aria-label="${escapeHtml(title)} ürün listesi">
           ${cardsHtml}
         </div>
-        <button type="button" class="${SECTION_CLASS}__arrow ${SECTION_CLASS}__arrow--next" aria-label="Sonraki ürünler">${arrowSvg('right')}</button>
+        <button type="button" class="${FLASH_PRODUCTS_SECTION_CLASS}__arrow ${FLASH_PRODUCTS_SECTION_CLASS}__arrow--next" aria-label="Sonraki ürünler">${arrowSvg('right')}</button>
       </div>
     </section>
   `;
@@ -266,15 +527,15 @@ var FlashProducts = (function (exports) {
     function attachListArrowListeners(section) {
         if (!section)
             return;
-        const list = section.querySelector(`.${SECTION_CLASS}__list`);
-        const prevBtn = section.querySelector(`.${SECTION_CLASS}__arrow--prev`);
-        const nextBtn = section.querySelector(`.${SECTION_CLASS}__arrow--next`);
+        const list = section.querySelector(`.${FLASH_PRODUCTS_SECTION_CLASS}__list`);
+        const prevBtn = section.querySelector(`.${FLASH_PRODUCTS_SECTION_CLASS}__arrow--prev`);
+        const nextBtn = section.querySelector(`.${FLASH_PRODUCTS_SECTION_CLASS}__arrow--next`);
         if (!list || !prevBtn || !nextBtn)
             return;
         const updateArrows = () => {
             const { scrollLeft, scrollWidth, clientWidth } = list;
-            prevBtn.classList.toggle(`${SECTION_CLASS}__arrow--disabled`, scrollLeft <= 0);
-            nextBtn.classList.toggle(`${SECTION_CLASS}__arrow--disabled`, scrollLeft >= scrollWidth - clientWidth - 2);
+            prevBtn.classList.toggle(`${FLASH_PRODUCTS_SECTION_CLASS}__arrow--disabled`, scrollLeft <= 0);
+            nextBtn.classList.toggle(`${FLASH_PRODUCTS_SECTION_CLASS}__arrow--disabled`, scrollLeft >= scrollWidth - clientWidth - 2);
         };
         prevBtn.addEventListener('click', () => {
             list.scrollBy({ left: -LIST_SCROLL_AMOUNT, behavior: 'smooth' });
@@ -311,9 +572,9 @@ var FlashProducts = (function (exports) {
             return;
         const counterHours = parseInt(section.getAttribute('data-counter-hours') || '24', 10);
         const updateDateStr = section.getAttribute('data-update-date')?.trim() || '';
-        const elH = section.querySelector(`.${SECTION_CLASS}__countdown-card-value[data-unit="h"]`);
-        const elM = section.querySelector(`.${SECTION_CLASS}__countdown-card-value[data-unit="m"]`);
-        const elS = section.querySelector(`.${SECTION_CLASS}__countdown-card-value[data-unit="s"]`);
+        const elH = section.querySelector(`.${FLASH_PRODUCTS_SECTION_CLASS}__countdown-card-value[data-unit="h"]`);
+        const elM = section.querySelector(`.${FLASH_PRODUCTS_SECTION_CLASS}__countdown-card-value[data-unit="m"]`);
+        const elS = section.querySelector(`.${FLASH_PRODUCTS_SECTION_CLASS}__countdown-card-value[data-unit="s"]`);
         if (!elH || !elM || !elS)
             return;
         const periodMs = counterHours * 60 * 60 * 1000;
@@ -336,10 +597,10 @@ var FlashProducts = (function (exports) {
                 elH.textContent = '00';
                 elM.textContent = '00';
                 elS.textContent = '00';
-                section.querySelector(`.${SECTION_CLASS}__countdown`)?.setAttribute('aria-label', 'Kampanya süresi doldu');
+                section.querySelector(`.${FLASH_PRODUCTS_SECTION_CLASS}__countdown`)?.setAttribute('aria-label', 'Kampanya süresi doldu');
                 return;
             }
-            section.querySelector(`.${SECTION_CLASS}__countdown`)?.setAttribute('aria-label', 'Kampanya bitiş sayacı');
+            section.querySelector(`.${FLASH_PRODUCTS_SECTION_CLASS}__countdown`)?.setAttribute('aria-label', 'Kampanya bitiş sayacı');
             const totalSec = Math.floor(remaining / 1000);
             const s = totalSec % 60;
             const m = Math.floor(totalSec / 60) % 60;
@@ -351,237 +612,6 @@ var FlashProducts = (function (exports) {
         intervalId = setInterval(tick, 1000);
         section.__yuddyFpCountdownInterval = intervalId;
         tick();
-    }
-    /**
-     * Sayfa alanları class="entry-row-1", "entry-row-2", "entry-row-3", ... ile tanımlı.
-     * flashBlockPositionRange:
-     *   0 = .entry-row-1'den önce
-     *   1 = .entry-row-1'den sonra
-     *   2 = .entry-row-2'den sonra
-     *   N = .entry-row-N'den sonra
-     * Önce bu class'lara göre yer bulunur; yoksa main içindeki çocuk sırasına göre fallback.
-     */
-    function findInsertionPoint(flashBlockPositionRange) {
-        const range = Math.max(0, Math.min(9, flashBlockPositionRange));
-        // 1) Class ile eşleştirme: .entry-row-1, .entry-row-2, ... (sayfa alanları)
-        // range === 0 → .entry-row-1'den önce; range >= 1 → .entry-row-${range}'tan sonra
-        if (range === 0) {
-            const anchor = document.querySelector('.entry-row-1');
-            if (anchor && anchor.parentElement) {
-                return { parent: anchor.parentElement, index: 0, insertBefore: anchor };
-            }
-        }
-        else {
-            const anchor = document.querySelector(`.entry-row-${range}`);
-            if (anchor && anchor.parentElement) {
-                return { parent: anchor.parentElement, index: range, insertAfter: anchor };
-            }
-        }
-        // 2) Fallback: main (veya benzeri) içindeki çocuk sırasına göre
-        const mainSelectors = [
-            'main',
-            '[role="main"]',
-            '#main',
-            '.main',
-            '.main-content',
-            '#content',
-            '.content',
-            '.page-content',
-            '#__next',
-            '#root',
-        ];
-        for (const sel of mainSelectors) {
-            const main = document.querySelector(sel);
-            if (!main)
-                continue;
-            const children = Array.from(main.children).filter((el) => {
-                const tag = el.tagName.toLowerCase();
-                const role = el.getAttribute('role');
-                const id = (el.id || '').toLowerCase();
-                if (tag === 'header' || tag === 'footer' || role === 'banner' || id.includes('header') || id.includes('footer'))
-                    return false;
-                return true;
-            });
-            if (children.length === 0) {
-                return { parent: main, index: 0 };
-            }
-            const index = Math.min(range, children.length);
-            if (index === 0) {
-                return { parent: main, index: 0 };
-            }
-            return { parent: main, index, insertAfter: children[index - 1] };
-        }
-        const body = document.body;
-        const firstMain = body.querySelector('main, #main, .main, [role="main"]') || body;
-        return { parent: firstMain, index: 0 };
-    }
-    /** Insert section into DOM */
-    function injectSection(html, flashBlockPositionRange) {
-        removeSection();
-        const point = findInsertionPoint(flashBlockPositionRange);
-        if (!point)
-            return;
-        const wrapper = document.createElement('div');
-        wrapper.innerHTML = html.trim();
-        const section = wrapper.firstElementChild;
-        if (!section)
-            return;
-        const { parent, index, insertAfter, insertBefore } = point;
-        if (insertBefore) {
-            parent.insertBefore(section, insertBefore);
-        }
-        else if (insertAfter) {
-            insertAfter.insertAdjacentElement('afterend', section);
-        }
-        else if (index === 0 && parent.firstChild) {
-            parent.insertBefore(section, parent.firstChild);
-        }
-        else {
-            parent.appendChild(section);
-        }
-    }
-    function removeSection() {
-        const el = document.getElementById(SECTION_ID$1);
-        if (!el)
-            return;
-        const intervalId = el.__yuddyFpCountdownInterval;
-        if (intervalId)
-            clearInterval(intervalId);
-        el.remove();
-    }
-
-    function parseNextDataConfigJson() {
-        const el = document.getElementById('__NEXT_DATA__');
-        if (!el?.textContent)
-            return null;
-        try {
-            const parsed = JSON.parse(el.textContent);
-            return parsed?.props?.pageProps?.configJson ?? null;
-        }
-        catch {
-            return null;
-        }
-    }
-    /** __NEXT_DATA__ içinden Ikas merchant config bilgisini okur. */
-    function merchantInfo() {
-        if (typeof document === 'undefined')
-            return null;
-        const cfg = parseNextDataConfigJson();
-        if (!cfg)
-            return null;
-        return cfg;
-    }
-
-    // Ikas "searchProducts" ile ürün id listesi üzerinden fiyat çekmek için
-    const SEARCH_PRODUCTS_QUERY = `
-query SearchProducts($input: SearchInput!) {
-  searchProducts(input: $input) {
-    results {
-      id
-      name
-      metaData { slug }
-      variants {
-        prices {
-          sellPrice
-          discountPrice
-        }
-      }
-    }
-    count
-  }
-}
-`;
-    function pickFirstPrice(variant) {
-        const priceData = variant?.prices?.[0];
-        if (!priceData)
-            return null;
-        const sell = priceData?.sellPrice;
-        const discount = priceData?.discountPrice;
-        const value = typeof discount === 'number' ? discount : sell;
-        if (typeof value !== 'number' || !Number.isFinite(value))
-            return null;
-        return value;
-    }
-    async function getPricesByProductIds(merchant, productIds) {
-        if (!productIds.length)
-            return new Map();
-        const input = {
-            salesChannelId: merchant.salesChannelId,
-            locale: merchant.merchantSettings.defaultLocale || 'tr',
-            page: 1,
-            perPage: Math.max(productIds.length, 10),
-            // Mobile tarafındaki SearchInput alanı
-            productIdList: productIds,
-            // Bazı backend'ler için `query` alanı zorunlu olabiliyor.
-            // `productIdList` ile filtrelediğimiz için burada '' kullanmak amaç.
-            query: '',
-            showStockOption: 'SHOW_ALL',
-        };
-        const response = await fetch(merchant.apiUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': merchant.apiKey,
-                'Language-Code': (merchant.merchantSettings.defaultLocale || 'TR').toUpperCase(),
-            },
-            body: JSON.stringify({
-                query: SEARCH_PRODUCTS_QUERY,
-                variables: { input },
-            }),
-        });
-        if (!response.ok) {
-            return new Map();
-        }
-        const result = await response.json();
-        const results = result?.data?.searchProducts?.results;
-        if (!Array.isArray(results))
-            return new Map();
-        const map = new Map();
-        for (const p of results) {
-            const id = p?.id ? String(p.id) : null;
-            if (!id)
-                continue;
-            const firstVariant = p?.variants?.[0];
-            const price = pickFirstPrice(firstVariant);
-            if (price == null)
-                continue;
-            map.set(id, price);
-        }
-        return map;
-    }
-    /**
-     * Flash product objelerini Ikas API'den fiyatla zenginleştirir.
-     * - Fiyat bulunamazsa item.price undefined kalır.
-     * - merchantInfo bulunamazsa direkt geri döner.
-     */
-    async function enrichFlashProductsWithPrices(items) {
-        const merchant = merchantInfo();
-        if (!merchant)
-            return items;
-        const ids = items.map((i) => i.id).filter(Boolean);
-        const priceMap = new Map();
-        const chunkSize = 20;
-        const chunks = [];
-        for (let i = 0; i < ids.length; i += chunkSize) {
-            chunks.push(ids.slice(i, i + chunkSize));
-        }
-        try {
-            for (const chunk of chunks) {
-                const partial = await getPricesByProductIds(merchant, chunk);
-                for (const [id, price] of partial.entries()) {
-                    priceMap.set(id, price);
-                }
-            }
-            for (const item of items) {
-                const price = priceMap.get(item.id);
-                if (typeof price === 'number')
-                    item.price = price;
-            }
-        }
-        catch {
-            // Silent fail: fiyat yoksa widget çalışmaya devam eder.
-        }
-        return items;
     }
 
     const SECTION_ID = 'yuddy-flash-products-section';
@@ -599,18 +629,13 @@ query SearchProducts($input: SearchInput!) {
     class FlashProducts {
         constructor(config = {}) {
             this.isInitialized = false;
-            const baseUrl = config.apiBaseUrl || "https://api.yuddy.com/api/v1";
+            const baseUrl = config.apiBaseUrl || "https://testapi.yuddy.com/api/v1";
             this.apiClient = new APIClient(baseUrl);
+            this.platform = config.platform;
             this.init();
         }
         isHomepage() {
-            if (typeof window === 'undefined')
-                return false;
-            if (window.YUDDY_FLASH_PRODUCTS_DEMO === true)
-                return true;
-            const path = window.location.pathname.replace(/\/+$/, '') || '/';
-            // Sadece ana URL'de göster
-            return path === '/';
+            return isFlashProductsHomepagePath();
         }
         async init() {
             if (this.isInitialized)
@@ -628,15 +653,21 @@ query SearchProducts($input: SearchInput!) {
             }
             if (!data || !data.isActive)
                 return;
-            const settings = data.flashProductGeneralSettings;
-            const products = settings?.applicableProducts || [];
+            const settings = data.flashProductGeneralSettings || {};
+            const rawProducts = settings.applicableProducts || [];
+            const products = rawProducts.filter((p) => p.status !== false);
             if (products.length === 0)
                 return;
-            // Tüm gelen flash ürünler için fiyatları (Ikas API üzerinden) çek
-            await enrichFlashProductsWithPrices(products);
-            const position = settings?.flashBlockPositionRange ?? 1;
-            const html = buildSectionHTML(data);
-            injectSection(html, position);
+            const renderData = {
+                ...data,
+                flashProductGeneralSettings: {
+                    ...settings,
+                    applicableProducts: products,
+                },
+            };
+            const position = settings.flashBlockPositionRange ?? 1;
+            const html = buildSectionHTML(renderData);
+            injectSection(html, position, this.platform);
             const section = document.getElementById(SECTION_ID);
             attachListArrowListeners(section);
             attachCountdown(section);
@@ -687,16 +718,7 @@ query SearchProducts($input: SearchInput!) {
     if (typeof window !== 'undefined') {
         window.FlashProducts = FlashProducts;
         let instance = null;
-        const isHomepage = () => {
-            if (window.YUDDY_FLASH_PRODUCTS_DEMO === true)
-                return true;
-            const path = window.location.pathname.replace(/\/$/, '') || '/';
-            const homePaths = ['', '/', '/home', '/index', '/anasayfa'];
-            const pathLower = path.toLowerCase();
-            if (pathLower.startsWith('/demo'))
-                return true;
-            return homePaths.includes(pathLower);
-        };
+        const isHomepage = () => isFlashProductsHomepagePath();
         const init = () => {
             if (!isHomepage()) {
                 if (instance) {
@@ -744,7 +766,14 @@ query SearchProducts($input: SearchInput!) {
     }
 
     exports.FlashProducts = FlashProducts;
+    exports.IDEASOFT_ENTRY_ROW_PREFIX = IDEASOFT_ENTRY_ROW_PREFIX;
+    exports.IDEASOFT_MAX_ENTRY_ROW_INDEX = IDEASOFT_MAX_ENTRY_ROW_INDEX;
     exports.default = FlashProducts;
+    exports.detectPlatform = detectPlatform;
+    exports.findInsertionPoint = findInsertionPoint;
+    exports.injectSection = injectSection;
+    exports.removeSection = removeSection;
+    exports.resolveIdeasoftEntryRow = resolveIdeasoftEntryRow;
 
     Object.defineProperty(exports, '__esModule', { value: true });
 
