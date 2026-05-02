@@ -1,6 +1,6 @@
 /*!
  * Flash Products Widget v1.0.0
- * Build Date: 02.05.2026 22:40:29
+ * Build Date: 02.05.2026 22:55:25
  * (c) 2026 Yuddy
  */
 var FlashProducts = (function (exports) {
@@ -205,6 +205,84 @@ var FlashProducts = (function (exports) {
     const IDEASOFT_ENTRY_ROW_PREFIX = 'entry-row';
     /** API `flashBlockPositionRange` ile uyum için üst sınır (entry-row-N indeksi). */
     const IDEASOFT_MAX_ENTRY_ROW_INDEX = 99;
+    /** id veya class içinde `entry-row-{sayı}` yakalar (`entry-row-11` ile `entry-row-1` karışmaz). */
+    const ENTRY_ROW_NUM_RE = /entry-row-(\d+)(?!\d)/;
+    function elementClassAndId(el) {
+        const idPart = el.id ? `${el.id} ` : '';
+        let cls = '';
+        if ('className' in el && el.className != null) {
+            cls = typeof el.className === 'string' ? el.className : el.className.baseVal || '';
+        }
+        if (!cls && el.getAttribute)
+            cls = el.getAttribute('class') || '';
+        return `${idPart}${cls}`;
+    }
+    function extractEntryRowNumber(el) {
+        const haystack = `${el.id || ''} ${elementClassAndId(el)}`;
+        const m = haystack.match(ENTRY_ROW_NUM_RE);
+        if (!m)
+            return null;
+        const n = parseInt(m[1], 10);
+        if (!Number.isFinite(n) || n < 1 || n > IDEASOFT_MAX_ENTRY_ROW_INDEX)
+            return null;
+        return n;
+    }
+    /**
+     * Aynı satır numarası için üst sarmalayıcıyı seç: başka adayın içinde kalanları ele.
+     */
+    function pickRepresentativeElements(candidates) {
+        const byNum = new Map();
+        for (const { rowNumber, element } of candidates) {
+            if (!byNum.has(rowNumber))
+                byNum.set(rowNumber, []);
+            byNum.get(rowNumber).push(element);
+        }
+        const out = [];
+        for (const [rowNumber, els] of byNum) {
+            const outer = els.filter((el) => !els.some((o) => o !== el && o.contains(el)));
+            outer.sort((a, b) => {
+                const pos = a.compareDocumentPosition(b);
+                if (pos & Node.DOCUMENT_POSITION_FOLLOWING)
+                    return -1;
+                if (pos & Node.DOCUMENT_POSITION_PRECEDING)
+                    return 1;
+                return 0;
+            });
+            if (outer[0])
+                out.push({ rowNumber, element: outer[0] });
+        }
+        return out.sort((a, b) => a.rowNumber - b.rowNumber);
+    }
+    /**
+     * Sayfadaki tüm entry-row-{n} köklerini bulur, satır numarasına göre sıralar.
+     * DOM sırasına güvenilmez; görsel sıra `rowNumber` ile hizalanır.
+     */
+    function collectIdeasoftEntryRowsSorted() {
+        if (typeof document === 'undefined')
+            return [];
+        const seen = new Set();
+        const raw = [];
+        const scan = (root) => {
+            let list;
+            try {
+                list = root.querySelectorAll('[id*="entry-row"], [class*="entry-row"]');
+            }
+            catch {
+                return;
+            }
+            list.forEach((el) => {
+                if (seen.has(el))
+                    return;
+                const n = extractEntryRowNumber(el);
+                if (n === null)
+                    return;
+                seen.add(el);
+                raw.push({ rowNumber: n, element: el });
+            });
+        };
+        scan(document);
+        return pickRepresentativeElements(raw);
+    }
     const MAIN_FALLBACK_SELECTORS = [
         'main',
         '[role="main"]',
@@ -250,8 +328,7 @@ var FlashProducts = (function (exports) {
         return null;
     }
     /**
-     * Ideasoft `entry-row-{n}` satır elemanı (id, class veya class token).
-     * n: 1, 2, 3, …
+     * Tek bir satır için ilk eşleşen eleman (collect kullanılamadığında).
      */
     function resolveIdeasoftEntryRow(rowNumber) {
         if (rowNumber < 1 || !Number.isFinite(rowNumber))
@@ -263,6 +340,7 @@ var FlashProducts = (function (exports) {
             `[id="${base}"]`,
             `.${base}`,
             `[class~="${base}"]`,
+            `[class*="${base}"]`,
         ]);
     }
 
@@ -293,22 +371,43 @@ var FlashProducts = (function (exports) {
     }
 
     /**
-     * Ideasoft: `entry-row-1`, `entry-row-2`, … ile hizalı yerleşim (Ikas id="0"… ile aynı anlam).
-     * - range 0 → ilk satırdan önce (`entry-row-1` öncesi)
-     * - range k (k≥1) → `entry-row-k` satırından sonra (modül, k. ile k+1. satır arasına düşer)
+     * Ideasoft: DOM’daki tüm `entry-row-{n}` kökleri toplanır, sayıya göre sıralanır (DOM sırasına güvenilmez).
+     * Ikas ile aynı anlam:
+     * - range 0 → ilk satırdan önce
+     * - range k (k≥1) → `entry-row-k` satırından hemen sonra (k ile k+1 arası)
+     *
+     * Tam `entry-row-k` yoksa: k’dan küçük en büyük satırdan sonra; hiç yoksa ilk satırdan önce vb.
      */
     function findInsertionPointIdeasoft(flashBlockPositionRange) {
         const range = Math.max(0, Math.min(IDEASOFT_MAX_ENTRY_ROW_INDEX, flashBlockPositionRange));
+        const rows = collectIdeasoftEntryRowsSorted();
+        if (rows.length === 0)
+            return null;
         if (range === 0) {
-            const anchor = resolveIdeasoftEntryRow(1);
-            if (anchor?.parentElement) {
-                return { parent: anchor.parentElement, index: 0, insertBefore: anchor };
+            const first = rows[0].element;
+            if (first.parentElement) {
+                return { parent: first.parentElement, index: 0, insertBefore: first };
             }
             return null;
         }
-        const anchor = resolveIdeasoftEntryRow(range);
-        if (anchor?.parentElement) {
-            return { parent: anchor.parentElement, index: range, insertAfter: anchor };
+        const exact = rows.find((r) => r.rowNumber === range);
+        if (exact?.element.parentElement) {
+            return { parent: exact.element.parentElement, index: range, insertAfter: exact.element };
+        }
+        const strictlyLower = rows.filter((r) => r.rowNumber < range);
+        if (strictlyLower.length > 0) {
+            const anchor = strictlyLower[strictlyLower.length - 1].element;
+            if (anchor.parentElement) {
+                return { parent: anchor.parentElement, index: range, insertAfter: anchor };
+            }
+        }
+        const first = rows[0];
+        if (first.rowNumber > range && first.element.parentElement) {
+            return { parent: first.element.parentElement, index: 0, insertBefore: first.element };
+        }
+        const last = rows[rows.length - 1];
+        if (last.element.parentElement) {
+            return { parent: last.element.parentElement, index: range, insertAfter: last.element };
         }
         return null;
     }
@@ -768,6 +867,7 @@ var FlashProducts = (function (exports) {
     exports.FlashProducts = FlashProducts;
     exports.IDEASOFT_ENTRY_ROW_PREFIX = IDEASOFT_ENTRY_ROW_PREFIX;
     exports.IDEASOFT_MAX_ENTRY_ROW_INDEX = IDEASOFT_MAX_ENTRY_ROW_INDEX;
+    exports.collectIdeasoftEntryRowsSorted = collectIdeasoftEntryRowsSorted;
     exports.default = FlashProducts;
     exports.detectPlatform = detectPlatform;
     exports.findInsertionPoint = findInsertionPoint;
