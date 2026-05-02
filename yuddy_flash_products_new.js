@@ -743,7 +743,7 @@ var FlashProducts = (function (exports) {
                 this.destroy();
                 return;
             }
-            // MANUAL TEST: her zaman yuddy.store engagement verisi (geri alırken bu satırı getFlashProduct() yapın)
+            // TEST: sabit mağaza — bitince getFlashProduct() veya kaynak rebuild
             let data = await this.apiClient.getFlashProduct('yuddy.store');
             if ((!data || !data.isActive) && isDemoOrLocal()) {
                 data = getDefaultDemoData();
