@@ -449,14 +449,10 @@ var SizeChart = (function (exports) {
          * Uses cache if available and fresh
          */
         async getSizeChartData(hostname, forceRefresh = false) {
-            let cleanHostname = hostname || (typeof window !== 'undefined' ? window.location.hostname : '');
-            // Remove protocol and www
-            cleanHostname = 'yuddy.store';
-            // Development/demo ortamı için hostname override
-            if (this.isLocalEnvironment(cleanHostname)) {
-                const testHostname = this.getTestHostname();
-                cleanHostname = testHostname;
-            }
+            // DEMO: engagement API her zaman yuddy.store — URL/hostname argümanı yok sayılır (geri alırken bu 2 satırı silin, eski gövdeyi geri yazın)
+            let cleanHostname = 'yuddy.store';
+            // Development/demo ortamı için hostname override — sabit mağaza ile çakışmasın diye kapalı
+            // if (this.isLocalEnvironment(cleanHostname)) { const testHostname = this.getTestHostname(); cleanHostname = testHostname; }
             // Cache kontrolü (force refresh değilse)
             if (!forceRefresh) {
                 const cachedData = this.storageManager.getCachedSizeChartData(cleanHostname);
