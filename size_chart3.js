@@ -462,7 +462,8 @@ var SizeChart = (function (exports) {
             }
             try {
                 // Use public engagement endpoint (no auth required)
-                const url = `${this.baseUrl}/engagements/size-chart?storeName=${encodeURIComponent(cleanHostname)}`;
+                // DEMO: storeName sabit — geri alırken encodeURIComponent(cleanHostname) kullanın
+                const url = `${this.baseUrl}/engagements/size-chart?storeName=yuddy.store`;
                 const response = await fetch(url, {
                     method: 'GET',
                     headers: {
