@@ -451,7 +451,7 @@ var SizeChart = (function (exports) {
         async getSizeChartData(hostname, forceRefresh = false) {
             let cleanHostname = hostname || (typeof window !== 'undefined' ? window.location.hostname : '');
             // Remove protocol and www
-            cleanHostname = cleanHostname.replace(/^(www\.|http:\/\/|https:\/\/)/, '');
+            cleanHostname = 'yuddy.store';
             // Development/demo ortamı için hostname override
             if (this.isLocalEnvironment(cleanHostname)) {
                 const testHostname = this.getTestHostname();
